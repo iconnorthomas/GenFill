@@ -123,6 +123,13 @@ class HelperTests(unittest.TestCase):
         for k in ("NUKE_PATH", "KMP_DUPLICATE_LIB_OK", "CUDA_PATH"):
             self.assertNotIn(k, env)
 
+    def test_clean_env_allocator(self):
+        with mock.patch.dict(os.environ, {"SystemRoot": r"C:\Windows"}):
+            os.environ.pop("PYTORCH_CUDA_ALLOC_CONF", None)
+            self.assertNotIn("PYTORCH_CUDA_ALLOC_CONF", lclient.clean_env(platform="win32"))
+            self.assertEqual(lclient.clean_env(platform="linux")["PYTORCH_CUDA_ALLOC_CONF"],
+                             "expandable_segments:True")
+
     def test_local_backend_via_helper(self):
         req = base.GenerationRequest(self.img, self.mask, self.mask, "", 32, 32, seed=1, count=2)
         with mock.patch.object(localai, "is_installed", return_value=True), \
