@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: copy/pasted GenerativeFill nodes shared one cache folder and job.** The copy kept the
+  original's uid, so a Generate on one showed as running on both, and deleting a variation on
+  one deleted the file the other was still showing. A copy now gets its own uid on its first
+  Generate or delete, and a delete never removes a file outside the node's own cache folder.
+- **Fix: a stale `helper.pid` could kill an unrelated process.** Before stopping a leftover AI
+  helper, GenFill now checks that the process's command line is really `worker.py` (it used to
+  accept any Python process on Windows and any process at all on macOS/Linux).
+- A failed Generate (empty selection, missing input) no longer leaves an empty `gNNN_...` folder.
+- Generation numbers are never reused after deleting a generation.
+- The node's history and `config.json` tolerate malformed contents instead of raising.
+- `config.json` (API keys) is created owner-only from the start, not chmod-ed after writing.
+- HTTP responses are closed after reading; the User-Agent carries the real GenFill version.
+
 ## 0.7.1 - 2026-10-13
 
 - README rewritten for the current build, with a full colour science section (encode / generate /

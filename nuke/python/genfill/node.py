@@ -10,7 +10,7 @@ Internal graph::
 
     Source ─┬─ FrameHold ── Crop ── Reformat ── Write(src.png, sRGB 8-bit)   ┐ send
             │                                                                │ (disabled
-    Mask ───┴─ Switch ── Erode(grow) ── FrameHold ── Expression(rgb=m, a=1-m)│  except while
+    Mask ───┴─ Switch ── Dilate(grow) ── FrameHold ── Expression(rgb=m, a=1-m)│  except while
                                 │                     ├─ Reformat(probe) ── Write(probe)
                                 │                     └─ Crop ── Reformat ── Write(mask, mask_a)
                                 │

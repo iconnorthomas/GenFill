@@ -47,8 +47,11 @@ def loads(text):
     if not isinstance(data, dict):
         return empty()
     data.setdefault("version", VERSION)
-    data.setdefault("generations", [])
-    data.setdefault("selected", None)
+    gens = data.get("generations")
+    data["generations"] = [g for g in gens if isinstance(g, dict)] if isinstance(gens, list) else []
+    sel = data.get("selected")
+    if not (isinstance(sel, list) and len(sel) == 2 and all(isinstance(i, int) for i in sel)):
+        data["selected"] = None
     return data
 
 
@@ -134,4 +137,10 @@ def remove_variation(state, gi, vi):
 
 
 def next_generation_number(state):
-    return len(state["generations"]) + 1
+    """One more than the highest ``gNNN`` id so far (never reuses a deleted one's number)."""
+    highest = 0
+    for gen in state["generations"]:
+        head = str(gen.get("id", "")).split("_", 1)[0]
+        if head[:1] == "g" and head[1:].isdigit():
+            highest = max(highest, int(head[1:]))
+    return max(highest, len(state["generations"])) + 1

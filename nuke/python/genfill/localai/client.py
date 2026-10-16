@@ -96,19 +96,37 @@ def kill_tree(pid):
         pass
 
 
-def _is_python_process(pid):
-    if not sys.platform.startswith("win"):
-        try:
-            os.kill(int(pid), 0)
-            return True
-        except OSError:
-            return False
+def _command_line(pid):
+    """Command line of a running process, "" if it isn't running, None if unknown."""
+    if sys.platform.startswith("win"):
+        cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+               "(Get-CimInstance Win32_Process -Filter 'ProcessId=%d').CommandLine" % int(pid)]
+    else:
+        cmd = ["ps", "-o", "command=", "-p", str(int(pid))]
     try:
-        out = subprocess.run(["tasklist", "/FI", "PID eq %d" % int(pid), "/FO", "CSV", "/NH"],
-                             capture_output=True, text=True, timeout=15, **hidden_popen_kwargs())
-        return "python" in out.stdout.lower()
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
+                             **hidden_popen_kwargs())
     except Exception:
-        return False
+        return None
+    if sys.platform.startswith("win") and out.returncode != 0:
+        return None
+    return out.stdout.strip()
+
+
+def _is_our_helper(pid):
+    """True only if ``pid`` is still our helper. The pid file can outlive the
+    helper (crash, reboot) and the pid be reused by an unrelated process."""
+    cmdline = _command_line(pid)
+    if cmdline is None and sys.platform.startswith("win"):
+        # No PowerShell/CIM: fall back to the image name.
+        try:
+            out = subprocess.run(["tasklist", "/FI", "PID eq %d" % int(pid), "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True, timeout=15,
+                                 **hidden_popen_kwargs())
+            return "python" in out.stdout.lower()
+        except Exception:
+            return False
+    return bool(cmdline) and os.path.basename(WORKER_SCRIPT).lower() in cmdline.lower()
 
 
 def kill_stale_helpers(base=None):
@@ -121,7 +139,7 @@ def kill_stale_helpers(base=None):
     except (IOError, OSError, ValueError):
         return False
     killed = False
-    if pid and pid != os.getpid() and _is_python_process(pid):
+    if pid and pid != os.getpid() and _is_our_helper(pid):
         kill_tree(pid)
         killed = True
     try:
@@ -261,7 +279,10 @@ class WorkerClient(object):
             q = self._pending.get(msg.get("id"))
             if q is not None:
                 q.put(msg)
-        # stdout closed: helper exited. Wake everyone waiting.
+        # stdout closed: helper exited. Wake everyone waiting, unless a new helper
+        # has already been started and the requests are waiting on that one.
+        if self.proc is not None and self.proc is not proc:
+            return
         for q in list(self._pending.values()):
             q.put({"event": "exited"})
 

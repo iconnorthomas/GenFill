@@ -3,6 +3,7 @@ process (in --fake mode, so no PyTorch needed) and the Nuke-side client talks
 to it over pipes exactly as it does inside Nuke."""
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -102,6 +103,20 @@ class HelperTests(unittest.TestCase):
         finally:
             fresh.stop()
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "logs", "helper.pid")))
+
+    def test_stale_pid_of_unrelated_process_is_not_killed(self):
+        # The pid file outlived the helper and the pid now belongs to something else.
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            os.makedirs(os.path.join(self.tmp, "logs"), exist_ok=True)
+            with open(os.path.join(self.tmp, "logs", "helper.pid"), "w") as fh:
+                fh.write(str(other.pid))
+            self.assertFalse(lclient.kill_stale_helpers(self.tmp))
+            self.assertIsNone(other.poll())
+            self.assertFalse(os.path.exists(os.path.join(self.tmp, "logs", "helper.pid")))
+        finally:
+            other.kill()
+            other.wait(10)
 
     def test_helper_log_tail(self):
         self.client.request("ping")

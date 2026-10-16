@@ -30,7 +30,9 @@ def save(data):
     if not os.path.isdir(CONFIG_DIR):
         os.makedirs(CONFIG_DIR)
     tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w") as fh:
+    # Owner-only from the start: the file holds API keys.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
     os.replace(tmp, CONFIG_PATH)
     try:
@@ -42,21 +44,26 @@ def save(data):
 def get_api_key(backend_id, env_var=None):
     if env_var and os.environ.get(env_var):
         return os.environ[env_var].strip()
-    return (load().get("api_keys", {}).get(backend_id) or "").strip()
+    return (_api_keys(load()).get(backend_id) or "").strip()
+
+
+def _api_keys(data):
+    keys = data.get("api_keys")
+    return keys if isinstance(keys, dict) else {}
 
 
 def key_source(backend_id, env_var=None):
     """Human readable description of where a key would come from."""
     if env_var and os.environ.get(env_var):
         return "environment variable %s" % env_var
-    if load().get("api_keys", {}).get(backend_id):
+    if _api_keys(load()).get(backend_id):
         return CONFIG_PATH
     return None
 
 
 def set_api_key(backend_id, key):
     data = load()
-    keys = data.setdefault("api_keys", {})
+    keys = data["api_keys"] = _api_keys(data)
     if key:
         keys[backend_id] = key.strip()
     else:
