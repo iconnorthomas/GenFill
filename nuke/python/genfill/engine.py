@@ -15,9 +15,11 @@ from __future__ import annotations
 import base64
 import datetime
 import os
+import shutil
 import subprocess
 import sys
 import threading
+import uuid
 
 import nuke
 
@@ -51,6 +53,37 @@ def _notify(message):
 
 def _uid(node):
     return node["gf_uid"].value()
+
+
+def _genfill_nodes():
+    try:
+        nodes = nuke.allNodes("Group", recurseGroups=True)
+    except TypeError:
+        nodes = nuke.allNodes()
+    return [n for n in nodes if "gf_uid" in n.knobs()]
+
+
+def ensure_unique_uid(node):
+    """Give a copy-pasted node its own uid (and so its own cache folder and job
+    status). Its earlier generations still resolve through their ``abs_dir``.
+    Returns True if the uid was changed."""
+    uid = _uid(node)
+    name = node.fullName()
+    for other in _genfill_nodes():
+        if other.fullName() != name and _uid(other) == uid:
+            new = uuid.uuid4().hex[:12]
+            node["gf_uid"].setValue(new)
+            gflog.info("%s shared uid %s with %s (copy/paste); now %s", node.fullName(), uid,
+                       other.fullName(), new)
+            return True
+    return False
+
+
+def _claim_uid(node):
+    """ensure_unique_uid(), except while this node's own job is running under its uid."""
+    current = status(node)
+    if not (current.get("running") and current.get("owner") == node.fullName()):
+        ensure_unique_uid(node)
 
 
 def status(node):
@@ -233,12 +266,18 @@ def step(node, delta):
 
 
 def delete_variation(node, gi, vi, delete_file=True):
+    _claim_uid(node)
     st = get_state(node)
     gen = st["generations"][gi]
     path = resolve(node, gen, gen["files"][vi])
     st, _removed = gfstate.remove_variation(st, gi, vi)
     _save_state(node, st)
     refresh_result(node)
+    own_dir = os.path.normcase(os.path.abspath(cache_dir(node))) + os.sep
+    if delete_file and not os.path.normcase(os.path.abspath(path)).startswith(own_dir):
+        # Inherited from the node this one was copied from: that node still uses it.
+        gflog.info("not deleting %s: it belongs to another node's cache", path)
+        delete_file = False
     if delete_file:
         for p in (path, os.path.splitext(path)[0] + "_preview.png"):
             try:
@@ -384,6 +423,7 @@ def generate(node, prompt=None, blocking=False):
     In that case the return value is True only if variations were added.
     """
     gflog.info("Generate clicked on %s (blocking=%s)", node.fullName(), blocking)
+    _claim_uid(node)
     if is_running(node):
         gflog.warning("A generation is already running on %s; ignoring click", node.fullName())
         _set_status(_uid(node), message="Already generating. Click Cancel to stop it.")
@@ -431,10 +471,13 @@ def generate(node, prompt=None, blocking=False):
 
     root = nuke.root()
     proxy = root["proxy"].value()
-    _set_status(uid, running=True, message="Preparing selection...", progress=0.0, error="")
+    _set_status(uid, running=True, owner=node.fullName(), message="Preparing selection...",
+                progress=0.0, error="")
+    made_dir = False
     try:
         if not os.path.isdir(job_dir):
             os.makedirs(job_dir)
+            made_dir = True
         if proxy:
             root["proxy"].setValue(False)
         node["gf_frame"].setValue(frame)
@@ -442,12 +485,16 @@ def generate(node, prompt=None, blocking=False):
     except UserError as exc:
         gflog.warning("Cannot generate: %s", exc)
         node["gf_frame"].setValue(prev_frame)
+        if made_dir:
+            shutil.rmtree(job_dir, ignore_errors=True)
         _set_status(uid, running=False, message="", error=str(exc))
         _notify(str(exc))
         return False
     except Exception as exc:  # unexpected: show and log
         gflog.exception("Preparing the selection failed")
         node["gf_frame"].setValue(prev_frame)
+        if made_dir:
+            shutil.rmtree(job_dir, ignore_errors=True)
         _set_status(uid, running=False, message="", error="Could not prepare: %s" % exc)
         _notify("GenFill could not prepare the selection:\n%s" % exc)
         return False

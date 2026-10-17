@@ -196,6 +196,39 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
         self.assertEqual(len(engine.thumbnails(g)), 5)
 
+    def test_copied_node_gets_its_own_uid_and_keeps_originals_files(self):
+        g = self.g
+        self.assertTrue(engine.generate(g, "a red vintage car", blocking=True))
+        # A copy/paste duplicates every knob, uid and history included.
+        copy = gfnode.create()
+        copy.setName("GenerativeFill_copy")
+        copy.setInput(0, self.plate)
+        fake_nuke.add_shape(copy.node(gfnode.ROTO))
+        copy["gf_backend"].setValue(g["gf_backend"].value())
+        for k in ("gf_uid", "gf_state"):
+            copy[k].setValue(g[k].value())
+        shared = engine.get_state(g)["generations"][0]
+        original_file = engine.resolve(g, shared, shared["files"][0])
+
+        engine.delete_variation(copy, 0, 0)
+        self.assertNotEqual(copy["gf_uid"].value(), g["gf_uid"].value())
+        self.assertTrue(os.path.exists(original_file), "the original still uses this file")
+        self.assertEqual(len(engine.thumbnails(copy)), 2)
+        self.assertEqual(len(engine.thumbnails(g)), 3)
+
+        self.assertTrue(engine.generate(copy, "", blocking=True))
+        newest = engine.get_state(copy)["generations"][-1]
+        self.assertTrue(newest["abs_dir"].startswith(engine.cache_dir(copy)))
+        self.assertNotEqual(engine.cache_dir(copy), engine.cache_dir(g))
+        self.assertEqual(newest["id"][:4], "g002")
+
+    def test_failed_prepare_leaves_no_empty_job_folder(self):
+        g = self.g
+        g.node(gfnode.ROTO)["curves"].rootLayer[:] = []
+        self.assertFalse(engine.generate(g, "x", blocking=True))
+        cache = engine.cache_dir(g)
+        self.assertEqual(os.listdir(cache) if os.path.isdir(cache) else [], [])
+
     def test_state_knob_has_no_tcl_characters(self):
         engine.generate(self.g, "a [bracketed] {prompt} $var", blocking=True)
         raw = self.g["gf_state"].value()

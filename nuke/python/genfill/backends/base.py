@@ -17,7 +17,9 @@ try:  # Python 3
 except ImportError:  # pragma: no cover - Python 2 Nuke is not supported
     raise
 
-USER_AGENT = "GenFill-Nuke/0.1"
+from .. import __version__
+
+USER_AGENT = "GenFill-Nuke/%s" % __version__
 
 
 class BackendError(RuntimeError):
@@ -120,8 +122,8 @@ def http_post(url, body, headers, timeout=180):
     hdrs.update(headers)
     req = _urlrequest.Request(url, data=body, headers=hdrs, method="POST")
     try:
-        resp = _urlrequest.urlopen(req, timeout=timeout)
-        return resp.getcode(), dict(resp.headers), resp.read()
+        with _urlrequest.urlopen(req, timeout=timeout) as resp:
+            return resp.getcode(), dict(resp.headers), resp.read()
     except HTTPError as exc:
         body = exc.read() if hasattr(exc, "read") else b""
         if exc.code in (401, 403):

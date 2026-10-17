@@ -165,6 +165,21 @@ class StateTests(unittest.TestCase):
         self.assertEqual(state.loads("{nope")["generations"], [])
         st = state.add_generation(state.empty(), self._gen(1))
         self.assertEqual(state.loads(state.dumps(st)), st)
+        bad = state.loads('{"generations": {"a": 1}, "selected": [1]}')
+        self.assertEqual(bad["generations"], [])
+        self.assertIsNone(state.selected(bad))
+        bad = state.loads('{"generations": [3, {"files": ["a"]}], "selected": "x"}')
+        self.assertEqual(bad["generations"], [{"files": ["a"]}])
+        self.assertIsNone(state.selected(bad))
+
+    def test_generation_numbers_are_not_reused(self):
+        st = state.empty()
+        self.assertEqual(state.next_generation_number(st), 1)
+        for n in (1, 2, 3):
+            st = state.add_generation(st, dict(self._gen(n), id="g%03d_20261012-2015%02d" % (n, n)))
+        for _ in range(3):
+            st, _ = state.remove_variation(st, 1, 0)     # drop g002
+        self.assertEqual(state.next_generation_number(st), 4)
 
 
 class _Req(object):
