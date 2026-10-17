@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: local AI self-test fails on Windows with "CUDA driver error: unknown error"**
+  ("Failed to create GPU mapping", `cuMemSetAccess`). The helper no longer turns on PyTorch's
+  `expandable_segments` allocator on Windows: recent PyTorch builds implement it with CUDA
+  virtual memory, which WDDM drivers can reject (seen with PyTorch 2.14 cu130, driver 610.88,
+  RTX PRO 6000 Blackwell). Linux keeps it.
+
 ## 0.7.1 - 2026-10-13
 
 - README rewritten for the current build, with a full colour science section (encode / generate /
