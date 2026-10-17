@@ -19,6 +19,11 @@
   `expandable_segments` allocator on Windows: recent PyTorch builds implement it with CUDA
   virtual memory, which WDDM drivers can reject (seen with PyTorch 2.14 cu130, driver 610.88,
   RTX PRO 6000 Blackwell). Linux keeps it.
+- **GenFill Setup: a graphical installer for Windows, macOS and Linux** in GenFill's own dark
+  theme. It installs, updates or removes the plugin it carries, can set up Local AI on Windows in
+  the same window, and offers to start Nuke when it's done. It writes the same files and `init.py`
+  block as `install.ps1`. Built per platform with `python builds/build.py` into `builds/`; inspired
+  by Aleš Ushakou's Windows setup app (#1).
 
 ## 0.7.1 - 2026-10-13
 

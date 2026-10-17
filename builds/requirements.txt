@@ -1,0 +1,4 @@
+# Pinned tools for building GenFill Setup (see builds/build.py).
+PySide6-Essentials==6.11.2
+pyinstaller==6.22.3
+pillow==12.3.0

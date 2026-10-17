@@ -20,3 +20,7 @@ desktop.ini
 test_output/
 nuke/python/genfill/build_info.json
 setup_git.bat
+
+# GenFill Setup build tools and intermediates (the finished installers in builds/<os>/ are committed)
+builds/.venv-*/
+builds/.work/
