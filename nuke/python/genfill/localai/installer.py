@@ -833,7 +833,7 @@ class Installer(object):
                 self.on_event("step", index=i, state="done", label=label)
             ok = True
             secs = self.result.get("selftest_seconds")
-            message = ("Local AI is ready on %s. Pick 'Local: FLUX.1 Fill' in a GenerativeFill node."
+            message = ("Local AI is ready on %s. Pick 'Local AI' as the model in a GenerativeFill node."
                        % (self.result.get("gpu") or "your GPU"))
             if secs:
                 message += " (Self-test took %ss.)" % secs
