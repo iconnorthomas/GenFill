@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **GenFill Setup: a graphical installer for Windows, macOS and Linux** in GenFill's own dark
+  theme. It installs, updates or removes the plugin it carries, can set up Local AI on Windows in
+  the same window, and offers to start Nuke when it's done. It writes the same files and `init.py`
+  block as `install.ps1`. Built per platform with `python builds/build.py` into `builds/`; inspired
+  by Aleš Ushakou's Windows setup app (#1).
+
 ## 0.7.1 - 2026-10-13
 
 - README rewritten for the current build, with a full colour science section (encode / generate /

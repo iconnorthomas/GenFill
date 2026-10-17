@@ -54,7 +54,12 @@ Current version: **0.7.1** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ### 1. The plugin
 
-Double-click **`installers\install.bat`**. It:
+**Easiest: GenFill Setup.** Download the installer for your system from [`builds/`](builds/)
+(Windows `.exe`, macOS `.zip`, Linux binary) and run it. It installs or updates GenFill, can
+set up the Local AI on Windows in the same window, and can remove GenFill again. See
+[builds/README.md](builds/README.md).
+
+**From a git checkout (Windows):** double-click **`installers\install.bat`**. It:
 
 1. runs the unit tests with Nuke's own Python (and installs nothing if they fail),
 2. copies the build to `%USERPROFILE%\.nuke\plugins\GenFill`, stamped with version and git commit,
@@ -63,8 +68,8 @@ Double-click **`installers\install.bat`**. It:
 Run it again whenever you want the latest build. Restart Nuke afterwards. Details, dev mode
 (live from the repo) and uninstall are in [installers/README.md](installers/README.md).
 
-Supported: Nuke 13 to 17 (Python 3, PySide2 or PySide6). The installer is Windows-only for now;
-on macOS/Linux add the repo's `nuke` folder to `NUKE_PATH`.
+Supported: Nuke 13 to 17 (Python 3, PySide2 or PySide6). GenFill Setup runs on Windows, macOS
+and Linux; the `install.bat` scripts are Windows-only.
 
 ### 2. The free local AI (optional, recommended)
 
