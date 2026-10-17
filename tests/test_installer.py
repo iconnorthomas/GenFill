@@ -147,6 +147,47 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((v["latent_channels"], v["scaling_factor"], v["shift_factor"]),
                          (16, 0.3611, 0.1159))
 
+    def test_klein_files_are_pinned_hashed_and_apache(self):
+        files = inst.model_files(None, inst.KLEIN)
+        rels = [f[0] for f in files]
+        rev = inst.HF_REVISIONS[inst.KLEIN_REPO]
+        self.assertIn("models/lama/big-lama.pt", rels)
+        self.assertIn(inst.KLEIN_DIR + "/model_index.json", rels)
+        for rel, url, gb, sha in files:
+            if "flux2-klein" in rel:
+                self.assertIn("/resolve/%s/" % rev, url)
+                self.assertNotIn("9B", url)                   # klein 9B is non-commercial
+            if rel.endswith(".safetensors"):
+                self.assertRegex(sha, "^[0-9a-f]{64}$")
+        self.assertFalse(any(r.endswith("flux-2-klein-4b.safetensors") for r in rels))
+        self.assertTrue(inst.FAMILIES[inst.KLEIN]["commercial"])
+        self.assertFalse(inst.FAMILIES[inst.FLUX1]["commercial"])
+        self.assertLess(inst.estimate_gb(None, inst.KLEIN), inst.estimate_gb("Q4_K_S"))
+        labels = [l for _k, l in inst.Installer.steps_for(inst.KLEIN)]
+        self.assertIn("Download FLUX.2 [klein] 4B, its text encoder and LaMa", labels)
+        self.assertEqual(len(labels), len(inst.Installer.STEPS))
+        with self.assertRaises(ValueError):
+            inst.Installer(base=self.inst.base, family="flux1-pro")
+
+    def test_klein_libraries_and_manifest(self):
+        k = inst.Installer(base=self.inst.base, family=inst.KLEIN)
+        k.uv = "uv"
+        cmds = []
+        with mock.patch.object(inst.Installer, "run_cmd", lambda self_, cmd, *a, **kw: cmds.append(cmd)):
+            k.step_libs()
+        self.assertIn("diffusers>=0.41", cmds[0])
+        cfg_dir = os.path.join(self.tmp, "nukecfg")
+        with mock.patch.object(config, "CONFIG_DIR", cfg_dir), \
+                mock.patch.object(config, "CONFIG_PATH", os.path.join(cfg_dir, "config.json")):
+            k.step_configure()
+        m = localai.manifest(self.inst.base)
+        self.assertEqual((m["family"], m["model_dir"]), (inst.KLEIN, inst.KLEIN_DIR))
+        self.assertEqual(localai.family(self.inst.base), inst.KLEIN)
+        self.assertNotIn("quant", m)
+        self.assertFalse(os.path.exists(os.path.join(self.inst.base, "models", "flux", "config")))
+        for key in ("unet", "vae"):
+            self.assertTrue(m[key].startswith(inst.KLEIN_DIR + "/"))
+
     def test_check_refuses_onedrive_and_cleans_comfyui(self):
         od = inst.Installer(base=os.path.join(self.tmp, "OneDrive", "GenFill-LocalAI"))
         with self.assertRaises(inst.InstallError):

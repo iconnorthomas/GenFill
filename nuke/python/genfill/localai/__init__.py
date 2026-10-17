@@ -6,9 +6,10 @@ deliberately outside OneDrive)::
     bin/uv.exe              tool that builds the private Python environment
     python/                 private Python (managed by uv)
     env/                    virtual environment with PyTorch + diffusers
-    models/flux/...         FLUX.1 Fill [dev] GGUF + configs
-    models/t5, models/clip  text encoders
+    models/flux/...         FLUX.1 Fill [dev] GGUF + configs        (family "flux1-fill")
+    models/t5, models/clip  its text encoders
     models/vae/ae.safetensors
+    models/flux2-klein/     FLUX.2 [klein] 4B, diffusers layout     (family "flux2-klein")
     models/lama/big-lama.pt
     manifest.json           what's installed (written last, so it means "complete")
     logs/                   installer and helper logs
@@ -50,6 +51,11 @@ def manifest(base=None):
         return data if isinstance(data, dict) else None
     except (IOError, OSError, ValueError):
         return None
+
+
+def family(base=None):
+    """Which model the install holds; installs from before 0.8 are FLUX.1 Fill."""
+    return (manifest(base) or {}).get("family") or "flux1-fill"
 
 
 def is_installed(base=None):

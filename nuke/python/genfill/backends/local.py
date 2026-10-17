@@ -1,10 +1,10 @@
 """Local generation inside the GenFill plugin (free, offline, no tokens).
 
-Uses the hidden AI helper (``genfill.localai``): FLUX.1 Fill [dev] for prompts,
-LaMa (+ FLUX refinement) when the prompt is empty. Installed from Nuke with
-GenFill > Local AI > Install.
-
-FLUX.1 [dev] models are under the FLUX.1 [dev] Non-Commercial License.
+Uses the hidden AI helper (``genfill.localai``) with whichever model the Local
+AI install holds: FLUX.1 Fill [dev] (FLUX.1 [dev] Non-Commercial License) or
+FLUX.2 [klein] 4B (Apache 2.0, commercial use allowed). LaMa (+ a refinement
+pass) handles an empty prompt. Installed from Nuke with GenFill > Local AI >
+Install, or with GenFill Setup.
 """
 from __future__ import annotations
 
@@ -15,6 +15,14 @@ from .base import Backend, BackendError, Cancelled
 from .. import colorspace, region
 
 QUALITY_STEPS = {"low": 16, "medium": 24, "auto": 24, "high": 32}
+# klein is distilled to 4 steps; a few more only help slightly.
+KLEIN_STEPS = {"low": 4, "medium": 4, "auto": 4, "high": 8}
+DESCRIPTIONS = {
+    "flux1-fill": ("Free and offline on this PC's GPU. FLUX.1 Fill for prompts, LaMa for removal. "
+                   "FLUX.1 [dev] license: non-commercial use only."),
+    "flux2-klein": ("Free and offline on this PC's GPU. FLUX.2 [klein] 4B for prompts, LaMa for "
+                    "removal. Apache 2.0: licensed for commercial and studio work."),
+}
 MAX_SEED = 2 ** 32 - 1
 
 
@@ -24,10 +32,10 @@ class NotInstalled(BackendError):
 
 class LocalBackend(Backend):
     id = "local"
-    label = "Local: FLUX.1 Fill (free, runs on your GPU)"
+    label = "Local AI (free, runs on your GPU)"
+    # Menu labels saved in older scripts that still mean this backend.
+    aliases = ("Local: FLUX.1 Fill (free, runs on your GPU)",)
     needs_key = False
-    description = ("Free and offline on this PC's GPU. FLUX.1 Fill for prompts, LaMa for removal. "
-                   "FLUX.1 [dev] licence: non-commercial use.")
     guidance = 30.0
     float_io = True         # 32-bit float TIFF in and out (no 8-bit rounding)
     result_ext = ".tif"
@@ -37,10 +45,22 @@ class LocalBackend(Backend):
         from .. import localai
         return localai.is_installed()
 
+    def family(self):
+        from .. import localai
+        return localai.family()
+
+    @property
+    def description(self):
+        return DESCRIPTIONS.get(self.family(), DESCRIPTIONS["flux1-fill"])
+
     def model_size(self, width, height, model=""):
         # FLUX works best around 1 MP; keep sides on a 64 px grid.
         return region.scale_to_pixel_budget(width, height, 1024 * 1024, 64, min_side=512,
                                             max_side=1536, max_aspect=3.0)
+
+    def _steps(self, quality):
+        table = KLEIN_STEPS if self.family() == "flux2-klein" else QUALITY_STEPS
+        return table.get(quality, table["auto"])
 
     def generate(self, request, api_key, progress=None, cancelled=None):
         from .. import localai
@@ -56,7 +76,7 @@ class LocalBackend(Backend):
             "height": request.height,
             "count": request.count,
             "seed": request.seed or random.randint(1, MAX_SEED - request.count),
-            "steps": QUALITY_STEPS.get(request.quality, QUALITY_STEPS["auto"]),
+            "steps": self._steps(request.quality),
             "guidance": self.guidance,
             "refine_strength": self.refine_strength,
             "out_dir": out_dir,

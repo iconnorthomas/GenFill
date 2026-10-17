@@ -145,7 +145,7 @@ def backend_labels():
 def backend_for(node):
     label = node["gf_backend"].value()
     for b in backends.all_backends():
-        if b.label == label:
+        if b.label == label or label in getattr(b, "aliases", ()):
             return b
     return backends.all_backends()[0]
 
@@ -518,6 +518,13 @@ def ensure_current(group):
         changed = True
     if "gf_transfer" in group.knobs():
         group["gf_transfer"].setLabel("custom colorspace")
+    knob = group.knobs().get("gf_backend")
+    if knob is not None and list(knob.values()) != backend_labels():
+        # A backend was renamed or added: keep the node on the same backend.
+        current = backend_for(group).label
+        knob.setValues(backend_labels())
+        knob.setValue(current)
+        changed = True
     knob = group.knobs().get("gf_output")
     if knob is not None and list(knob.values()) != OUTPUT_MODES:
         idx = int(knob.getValue())

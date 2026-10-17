@@ -103,6 +103,18 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("RuntimeError: boom", messages[0])
         self.assertIs(gfnode.create().Class(), self.g.Class())   # still works afterwards
 
+    def test_old_local_label_still_means_local_ai(self):
+        g = self.g
+        old = "Local: FLUX.1 Fill (free, runs on your GPU)"
+        labels = gfnode.backend_labels()
+        g["gf_backend"].setValues([old] + labels[1:])
+        g["gf_backend"].setValue(old)
+        self.assertEqual(gfnode.backend_for(g).id, "local")
+        self.assertTrue(gfnode.ensure_current(g))
+        self.assertEqual(list(g["gf_backend"].values()), labels)
+        self.assertEqual(g["gf_backend"].value(), "Local AI (free, runs on your GPU)")
+        self.assertFalse(gfnode.ensure_current(g))
+
     def test_empty_shapes_explains_what_to_do(self):
         g = self.g
         g.node(gfnode.ROTO)["curves"].rootLayer[:] = []

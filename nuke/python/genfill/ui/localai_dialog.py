@@ -63,8 +63,8 @@ class LocalAIDialog(QtWidgets.QDialog):
 
         intro = QtWidgets.QLabel(
             "Free, offline Generative Fill on your own GPU, with no tokens or accounts. Installs "
-            "FLUX.1 Fill (prompted fill) and LaMa (object removal) into a private folder. The AI "
-            "runs in a hidden helper that only starts when you click Generate and exits with Nuke.")
+            "a fill model and LaMa (object removal) into a private folder. The AI runs in a "
+            "hidden helper that only starts when you click Generate and exits with Nuke.")
         intro.setWordWrap(True)
         intro.setObjectName("gfMuted")
         lay.addWidget(intro)
@@ -75,26 +75,38 @@ class LocalAIDialog(QtWidgets.QDialog):
         self.folder_label = QtWidgets.QLabel(self._localai.root())
         self.folder_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         form.addRow("Install folder", self.folder_label)
+        self.family_combo = QtWidgets.QComboBox()
+        self.family_combo.setObjectName("gfModel")
+        for fid, fam in self._inst_mod.FAMILIES.items():
+            self.family_combo.addItem(fam["label"] + ("  (commercial use OK)" if fam["commercial"]
+                                                      else "  (non-commercial)"), fid)
+        self.family_combo.setCurrentIndex(max(0, self.family_combo.findData(
+            self._localai.family() if self._localai.manifest() else self._inst_mod.FLUX1)))
+        self.family_combo.currentIndexChanged.connect(self._family_changed)
+        form.addRow("Model", self.family_combo)
         self.size_combo = QtWidgets.QComboBox()
         self.size_combo.setObjectName("gfModel")
         for qid, (label, _gb, _vram) in self._inst_mod.QUANTS.items():
             self.size_combo.addItem(label, qid)
         self.size_combo.currentIndexChanged.connect(self._refresh_space)
-        form.addRow("Model size", self.size_combo)
+        self.size_label = QtWidgets.QLabel("Model size")
+        form.addRow(self.size_label, self.size_combo)
         self.space_label = QtWidgets.QLabel("")
         form.addRow("Disk", self.space_label)
         lay.addLayout(form)
 
-        lic = QtWidgets.QLabel("Licence: FLUX.1 [dev] models are for non-commercial use.")
-        lic.setObjectName("gfMuted")
-        lay.addWidget(lic)
+        self.license_label = QtWidgets.QLabel("")
+        self.license_label.setWordWrap(True)
+        self.license_label.setOpenExternalLinks(True)
+        self.license_label.setObjectName("gfMuted")
+        lay.addWidget(self.license_label)
 
         self.step_labels = []
         steps_box = QtWidgets.QFrame()
         steps_box.setStyleSheet("QFrame { background: #232323; border-radius: 8px; }")
         sl = QtWidgets.QVBoxLayout(steps_box)
         sl.setContentsMargins(12, 10, 12, 10)
-        for _key, label in self._inst_mod.Installer.STEPS:
+        for _key, label in self._inst_mod.Installer.steps_for(self._family()):
             row = QtWidgets.QLabel("%s  %s" % (PENDING, label))
             row.setStyleSheet("color: #9a9a9a; background: transparent;")
             sl.addWidget(row)
@@ -142,6 +154,30 @@ class LocalAIDialog(QtWidgets.QDialog):
         close.clicked.connect(self.hide)
         btns.addWidget(close)
         lay.addLayout(btns)
+        self._family_changed()
+
+    def _family(self):
+        return self.family_combo.currentData() or self._inst_mod.FLUX1
+
+    def _family_changed(self, *args):
+        fam = self._inst_mod.FAMILIES[self._family()]
+        flux1 = self._family() == self._inst_mod.FLUX1
+        self.size_combo.setVisible(flux1)
+        self.size_label.setVisible(flux1)
+        self.license_label.setText('%s License: <a href="%s" style="color:#8fa6ff">%s</a>.'
+                                   % (fam["summary"], fam["license_url"], fam["license"]))
+        if self.thread is None or not self.thread.is_alive():
+            for i, (_key, label) in enumerate(self._inst_mod.Installer.steps_for(self._family())):
+                self.step_labels[i].setText("%s  %s" % (PENDING, label))
+            self.install_btn.setText(self._install_text())
+        self._refresh_space()
+
+    def _install_text(self):
+        if not self._localai.is_installed():
+            return "Install"
+        if self._localai.family() != self._family():
+            return "Switch to %s" % self._inst_mod.FAMILIES[self._family()]["label"]
+        return "Repair / Reinstall"
 
     def _toggle_details(self, on):
         self.log_view.setVisible(on)
@@ -152,12 +188,14 @@ class LocalAIDialog(QtWidgets.QDialog):
         if self.thread is not None and self.thread.is_alive():
             return
         installed = self._localai.is_installed()
-        self.install_btn.setText("Repair / Reinstall" if installed else "Install")
+        self.install_btn.setText(self._install_text())
         m = self._localai.manifest() or {}
         if installed:
             verified = "verified" if m.get("verified") else "not verified yet"
-            self.status.setText("Installed (%s, %s). Repair re-checks everything and fixes "
-                                "missing files." % (m.get("quant"), verified))
+            fam = self._inst_mod.FAMILIES.get(self._localai.family(), {})
+            what = fam.get("label", "?") + (", %s" % m["quant"] if m.get("quant") else "")
+            self.status.setText("Installed: %s (%s). Repair re-checks everything and fixes "
+                                "missing files; pick the other model to switch." % (what, verified))
 
         def detect():
             name, vram = self._inst_mod.detect_gpu()
@@ -188,14 +226,15 @@ class LocalAIDialog(QtWidgets.QDialog):
             probe = os.path.dirname(probe)
         free = shutil.disk_usage(probe or os.path.expanduser("~")).free / 1e9
         self.space_label.setText("about %.0f GB needed, %.0f GB free"
-                                 % (self._inst_mod.estimate_gb(q), free))
+                                 % (self._inst_mod.estimate_gb(q, self._family()), free))
 
     # -- actions ---------------------------------------------------------------
     def _start(self):
         if self.thread is not None and self.thread.is_alive():
             return
+        steps = self._inst_mod.Installer.steps_for(self._family())
         for i, row in enumerate(self.step_labels):
-            row.setText("%s  %s" % (PENDING, self._inst_mod.Installer.STEPS[i][1]))
+            row.setText("%s  %s" % (PENDING, steps[i][1]))
             row.setStyleSheet("color: #9a9a9a; background: transparent;")
         self.log_view.clear()
         self.bar.setValue(0)
@@ -205,11 +244,12 @@ class LocalAIDialog(QtWidgets.QDialog):
         client.stop_helper()   # files may be replaced
         self.installer = self._inst_mod.Installer(
             base=self._localai.root(), quant=self.size_combo.currentData(),
-            on_event=lambda kind, **kw: self.emitter.event.emit(kind, kw))
+            family=self._family(), on_event=lambda kind, **kw: self.emitter.event.emit(kind, kw))
         self.thread = threading.Thread(target=self.installer.run, name="GenFill-install",
                                        daemon=True)
         self.install_btn.setEnabled(False)
         self.size_combo.setEnabled(False)
+        self.family_combo.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.thread.start()
 
@@ -261,8 +301,9 @@ class LocalAIDialog(QtWidgets.QDialog):
                 self.details_btn.setChecked(True)
             self.install_btn.setEnabled(True)
             self.size_combo.setEnabled(True)
+            self.family_combo.setEnabled(True)
             self.cancel_btn.setEnabled(False)
-            self.install_btn.setText("Repair / Reinstall" if self._localai.is_installed() else "Install")
+            self.install_btn.setText(self._install_text())
             if not self.isVisible():
                 self.show()
                 self.raise_()

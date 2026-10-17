@@ -24,6 +24,12 @@
   the same window, and offers to start Nuke when it's done. It writes the same files and `init.py`
   block as `install.ps1`. Built per platform with `python builds/build.py` into `builds/`; inspired
   by Aleš Ushakou's Windows setup app (#1).
+- **Local AI: choose a commercially licensed model.** Local AI can now install **FLUX.2 [klein] 4B**
+  (Apache 2.0, from Black Forest Labs) instead of FLUX.1 Fill [dev] (non-commercial). Pick it in
+  *Local AI > Install / Repair*; switching keeps the environment and LaMa and downloads only the
+  new model (about 16 GB, pinned and SHA-256 checked). klein runs as a true masked fill
+  (diffusers' `Flux2KleinInpaintPipeline`) in 4 steps. The node's model menu entry is now
+  **Local AI**, which uses whichever model is installed; older scripts keep working.
 
 ## 0.7.1 - 2026-10-13
 

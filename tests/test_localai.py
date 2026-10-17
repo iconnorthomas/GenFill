@@ -161,6 +161,18 @@ class HelperTests(unittest.TestCase):
             with self.assertRaises(local.NotInstalled):
                 local.LocalBackend().generate(req, "")
 
+    def test_local_backend_follows_installed_model(self):
+        b = local.LocalBackend()
+        with mock.patch.object(localai, "family", return_value="flux1-fill"):
+            self.assertIn("non-commercial", b.description)
+            self.assertEqual(b._steps("auto"), 24)
+        with mock.patch.object(localai, "family", return_value="flux2-klein"):
+            self.assertIn("commercial", b.description)
+            self.assertNotIn("non-commercial", b.description)
+            self.assertEqual(b._steps("auto"), 4)
+            self.assertEqual(b._steps("high"), 8)
+        self.assertEqual(localai.family(self.tmp), "flux1-fill")     # no manifest: old default
+
     def test_is_installed_requires_manifest_and_files(self):
         self.assertFalse(localai.is_installed(self.tmp))
         os.makedirs(os.path.dirname(localai.env_python(self.tmp)))

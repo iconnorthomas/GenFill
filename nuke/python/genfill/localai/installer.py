@@ -55,6 +55,34 @@ PYTHON_VERSION = "3.12"
 LIBRARIES = ["diffusers>=0.34", "transformers>=4.48", "accelerate>=1.2", "gguf>=0.10.0",
              "sentencepiece", "protobuf", "safetensors", "pillow", "numpy", "tifffile"]
 
+# Model families the Local AI can install. One is installed at a time; switching
+# re-runs the installer, which keeps the environment and LaMa and only downloads
+# the other model.
+FLUX1 = "flux1-fill"
+KLEIN = "flux2-klein"
+FAMILIES = {
+    FLUX1: {
+        "label": "FLUX.1 Fill [dev]",
+        "summary": "Best fill quality. Non-commercial use only (FLUX.1 [dev] license).",
+        "license": "FLUX.1 [dev] Non-Commercial License",
+        "license_url": "https://huggingface.co/black-forest-labs/FLUX.1-Fill-dev/blob/main/LICENSE.md",
+        "commercial": False,
+        "libraries": [],
+    },
+    KLEIN: {
+        "label": "FLUX.2 [klein] 4B",
+        "summary": "Licensed for commercial and studio work (Apache 2.0). Fast: 4 steps per image.",
+        "license": "Apache License 2.0",
+        "license_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/main/LICENSE.md",
+        "commercial": True,
+        # Flux2KleinInpaintPipeline arrived in diffusers 0.41; its Qwen3 text
+        # encoder needs a recent transformers.
+        "libraries": ["diffusers>=0.41", "transformers>=4.51"],
+    },
+}
+KLEIN_REPO = "black-forest-labs/FLUX.2-klein-4B"
+KLEIN_DIR = "models/flux2-klein"
+
 QUANTS = {
     # id: (label, file size GB, minimum VRAM GB it's meant for)
     "Q4_K_S": ("Standard: fits a 12 GB GPU alongside Nuke (6.8 GB model)", 6.8, 8),
@@ -69,7 +97,41 @@ HF_REVISIONS = {
     "city96/t5-v1_1-xxl-encoder-bf16": "1b9c856aadb864af93c1dcdc226c2774fa67bc86",
     "openai/clip-vit-large-patch14": "32bd64288804d66eefd0ccbe215aa642df71cc41",
     "Comfy-Org/Lumina_Image_2.0_Repackaged": "5b072540ef86570fecb8249c505f23d5bdeb88cd",
+    KLEIN_REPO: "e7b7dc27f91deacad38e78976d1f2b499d76a294",
 }
+# FLUX.2 [klein] 4B in diffusers layout: (path in the repo, approx GB, LFS SHA-256).
+# The repo's single-file copy (flux-2-klein-4b.safetensors) duplicates transformer/
+# and is skipped. Files without a hash are plain git files fixed by the commit pin.
+KLEIN_FILES = [
+    ("model_index.json", 0.0, None),
+    ("scheduler/scheduler_config.json", 0.0, None),
+    ("transformer/config.json", 0.0, None),
+    ("transformer/diffusion_pytorch_model.safetensors", 7.75,
+     "9f29f9edcfdae452a653ffb51a534ca4decd389952c225724ff3b94042612a6e"),
+    ("vae/config.json", 0.0, None),
+    ("vae/diffusion_pytorch_model.safetensors", 0.17,
+     "ca70d2202afe6415bdbcb8793ba8cd99fd159cfe6192381504d6c4d3036e0f04"),
+    ("text_encoder/config.json", 0.0, None),
+    ("text_encoder/generation_config.json", 0.0, None),
+    ("text_encoder/model.safetensors.index.json", 0.0, None),
+    ("text_encoder/model-00001-of-00002.safetensors", 4.97,
+     "8c0506e7f4936fa7e26183a4fd8da4e2bdbc5990ba64ae441f965d51228f36ea"),
+    ("text_encoder/model-00002-of-00002.safetensors", 3.08,
+     "82f2bd839378541b0557bfabaf37c7d3d637071fdcb73302dedd7cf61162ce07"),
+    ("tokenizer/added_tokens.json", 0.0, None),
+    ("tokenizer/chat_template.jinja", 0.0, None),
+    ("tokenizer/merges.txt", 0.0, None),
+    ("tokenizer/special_tokens_map.json", 0.0, None),
+    ("tokenizer/tokenizer.json", 0.01,
+     "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"),
+    ("tokenizer/tokenizer_config.json", 0.0, None),
+    ("tokenizer/vocab.json", 0.0, None),
+]
+LAMA_FILE = (
+    # TODO: SHA-256 for big-lama.pt. The release publishes no digest; the
+    # author's IOPaint code lists only an MD5 (e3aa4aaa15225a33ec84f9f4bc47e500).
+    "models/lama/big-lama.pt",
+    "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt", 0.2, None)
 FLUX_SHA256 = {
     "Q4_K_S": "3782c22eda0622d50eb8683d2aa664e8534a8c1e29ce9e91df491cc400944dc8",
     "Q6_K": "d538635d81ed5eca59fa2f5a7b68709f0b5584d936570a8695e4d1ae4d518a72",
@@ -89,8 +151,11 @@ def recommended_quant(vram_gb):
     return "Q8_0"
 
 
-def model_files(quant):
+def model_files(quant, family=FLUX1):
     """(relative path, url, approx GB, SHA-256 or None) for every model file."""
+    if family == KLEIN:
+        return [("%s/%s" % (KLEIN_DIR, path), hf_url(KLEIN_REPO, path), gb, sha)
+                for path, gb, sha in KLEIN_FILES] + [LAMA_FILE]
     t5, clip = "city96/t5-v1_1-xxl-encoder-bf16", "openai/clip-vit-large-patch14"
     files = [
         ("models/flux/flux1-fill-dev-%s.gguf" % quant,
@@ -105,10 +170,7 @@ def model_files(quant):
         ("models/vae/ae.safetensors",
          hf_url("Comfy-Org/Lumina_Image_2.0_Repackaged", "split_files/vae/ae.safetensors"), 0.33,
          "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"),
-        # TODO: SHA-256 for big-lama.pt. The release publishes no digest; the
-        # author's IOPaint code lists only an MD5 (e3aa4aaa15225a33ec84f9f4bc47e500).
-        ("models/lama/big-lama.pt",
-         "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt", 0.2, None),
+        LAMA_FILE,
     ]
     # Small tokenizer/config files are plain git files on Hugging Face, which
     # publishes no SHA-256 for them; the pinned commit in the URL fixes their content.
@@ -282,8 +344,8 @@ def version_tuple(text):
         return None
 
 
-def estimate_gb(quant):
-    return sum(f[2] for f in model_files(quant)) + 7.0   # + PyTorch environment
+def estimate_gb(quant, family=FLUX1):
+    return sum(f[2] for f in model_files(quant, family)) + 7.0   # + PyTorch environment
 
 
 class Installer(object):
@@ -299,9 +361,21 @@ class Installer(object):
         ("selftest", "Self-test on your GPU"),
     ]
 
-    def __init__(self, base=None, quant=None, on_event=None, platform=None):
+    @classmethod
+    def steps_for(cls, family=FLUX1):
+        """The step list with the download step named for ``family``."""
+        if family != KLEIN:
+            return list(cls.STEPS)
+        return [(k, "Download FLUX.2 [klein] 4B, its text encoder and LaMa" if k == "models" else l)
+                for k, l in cls.STEPS]
+
+    def __init__(self, base=None, quant=None, on_event=None, platform=None, family=FLUX1):
+        if family not in FAMILIES:
+            raise ValueError("unknown Local AI model %r" % family)
         self.base = base or default_root()
         self.quant = quant
+        self.family = family
+        self.steps = self.steps_for(family)
         self.on_event = on_event or (lambda kind, **kw: None)
         self.platform = platform or sys.platform
         self._cancel = threading.Event()
@@ -462,8 +536,11 @@ class Installer(object):
             self.log("WARNING: no NVIDIA GPU detected (nvidia-smi not found).")
         if not self.quant:
             self.quant = recommended_quant(vram)
-        self.log("model size: %s (%s)" % (self.quant, QUANTS[self.quant][0]))
-        need = sum(f[2] for f in model_files(self.quant)
+        if self.family == KLEIN:
+            self.log("model: %s (%s)" % (FAMILIES[KLEIN]["label"], FAMILIES[KLEIN]["license"]))
+        else:
+            self.log("model size: %s (%s)" % (self.quant, QUANTS[self.quant][0]))
+        need = sum(f[2] for f in model_files(self.quant, self.family)
                    if not os.path.exists(self.path(*f[0].split("/")))) + \
             (0 if os.path.exists(env_python(self.base)) else 7.0)
         free = shutil.disk_usage(self.base).free / 1e9
@@ -552,7 +629,8 @@ class Installer(object):
 
     def step_libs(self):
         self.run_cmd([self.uv, "pip", "install", "--python", env_python(self.base),
-                      "--compile-bytecode"] + LIBRARIES, "Installing libraries", self._uv_env())
+                      "--compile-bytecode"] + LIBRARIES + FAMILIES[self.family]["libraries"],
+                     "Installing libraries", self._uv_env())
 
     # -- C++ runtime ------------------------------------------------------------
     def base_python_dir(self):
@@ -652,7 +730,7 @@ class Installer(object):
                      "Checking libraries")
 
     def step_models(self):
-        files = model_files(self.quant)
+        files = model_files(self.quant, self.family)
         total = sum(f[2] for f in files) or 1.0
         done = 0.0
         for rel, url, gb, sha256 in files:
@@ -677,27 +755,31 @@ class Installer(object):
             os.remove(src)   # transformers would prefer the single file if both exist
 
     def step_configure(self):
-        self.split_big_weights()
-        cfg_dir = self.path("models", "flux", "config")
-        for rel, data in FLUX_CONFIGS.items():
-            p = os.path.join(cfg_dir, *rel.split("/"))
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            with open(p, "w") as fh:
-                json.dump(data, fh, indent=2)
-        manifest = {
+        common = {
             "version": 1,
-            "quant": self.quant,
-            "unet": "models/flux/flux1-fill-dev-%s.gguf" % self.quant,
-            "flux_config_dir": "models/flux/config",
-            "vae": "models/vae/ae.safetensors",
-            "clip_dir": "models/clip",
-            "t5_dir": "models/t5",
+            "family": self.family,
             "lama": "models/lama/big-lama.pt",
             "installed": datetime.datetime.now().isoformat(timespec="seconds"),
             "gpu": self.gpu[0],
             "vram_gb": self.gpu[1],
             "verified": False,
         }
+        if self.family == KLEIN:
+            manifest = dict(common, model_dir=KLEIN_DIR,
+                            unet=KLEIN_DIR + "/transformer/diffusion_pytorch_model.safetensors",
+                            vae=KLEIN_DIR + "/vae/diffusion_pytorch_model.safetensors")
+        else:
+            self.split_big_weights()
+            cfg_dir = self.path("models", "flux", "config")
+            for rel, data in FLUX_CONFIGS.items():
+                p = os.path.join(cfg_dir, *rel.split("/"))
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w") as fh:
+                    json.dump(data, fh, indent=2)
+            manifest = dict(common, quant=self.quant,
+                            unet="models/flux/flux1-fill-dev-%s.gguf" % self.quant,
+                            flux_config_dir="models/flux/config", vae="models/vae/ae.safetensors",
+                            clip_dir="models/clip", t5_dir="models/t5")
         with open(self.path(MANIFEST), "w") as fh:
             json.dump(manifest, fh, indent=2)
         data = config.load()
@@ -708,7 +790,8 @@ class Installer(object):
     def step_selftest(self):
         client = WorkerClient(base=self.base, idle=60)
         try:
-            self.progress(None, "Loading FLUX.1 Fill on your GPU (first load takes a minute)...")
+            self.progress(None, "Loading %s on your GPU (first load takes a minute)..."
+                          % FAMILIES[self.family]["label"])
             done = client.request("selftest", {},
                                   progress=lambda f, m: self.progress(None, "Self-test: " + m),
                                   cancelled=self._cancel.is_set, timeout=1800)
@@ -741,7 +824,7 @@ class Installer(object):
         ok, message = False, ""
         current = 0
         try:
-            for i, (key, label) in enumerate(self.STEPS):
+            for i, (key, label) in enumerate(self.steps):
                 current = i
                 self._check_cancel()
                 self.on_event("step", index=i, state="running", label=label)
@@ -755,10 +838,10 @@ class Installer(object):
             if secs:
                 message += " (Self-test took %ss.)" % secs
         except InstallCancelled:
-            self.on_event("step", index=current, state="failed", label=self.STEPS[current][1])
+            self.on_event("step", index=current, state="failed", label=self.steps[current][1])
             message = "Installation cancelled. Run Install again to resume where it stopped."
         except Exception as exc:
-            self.on_event("step", index=current, state="failed", label=self.STEPS[current][1])
+            self.on_event("step", index=current, state="failed", label=self.steps[current][1])
             message = str(exc) if isinstance(exc, InstallError) else "%s: %s" % (type(exc).__name__, exc)
             import traceback
             self.log(traceback.format_exc())

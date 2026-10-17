@@ -149,14 +149,17 @@ class Job(object):
 
 
 # --------------------------------------------------------------------------
-# real engine: FLUX.1 Fill (diffusers, GGUF) + LaMa
+# real engine: FLUX.1 Fill (diffusers, GGUF) or FLUX.2 [klein] 4B, + LaMa
 # --------------------------------------------------------------------------
+
+FLUX1, KLEIN = "flux1-fill", "flux2-klein"
 
 class Engine(object):
     def __init__(self, root):
         self.root = root
         with open(os.path.join(root, "manifest.json"), "r") as fh:
             self.manifest = json.load(fh)
+        self.family = self.manifest.get("family") or FLUX1    # old installs: FLUX.1 Fill
         self.pipe = None
         self.lama = None
         self.device = None
@@ -173,6 +176,7 @@ class Engine(object):
             free, total = torch.cuda.mem_get_info()
             out.update(gpu=p.name, vram_total=total, vram_free=free)
         out["model"] = self.manifest.get("unet")
+        out["family"] = self.family
         out["loaded"] = self.pipe is not None
         return out
 
@@ -180,10 +184,6 @@ class Engine(object):
         if self.pipe is not None:
             return
         import torch
-        from diffusers import (AutoencoderKL, FlowMatchEulerDiscreteScheduler, FluxFillPipeline,
-                               FluxTransformer2DModel, GGUFQuantizationConfig)
-        from transformers import CLIPTextModel, CLIPTokenizer, T5TokenizerFast
-
         if not torch.cuda.is_available():
             raise RuntimeError(
                 "The Local AI's PyTorch can't use your NVIDIA GPU (on the CPU a fill would take "
@@ -193,6 +193,11 @@ class Engine(object):
         log("libraries imported (torch %s, CUDA %s, %s)", torch.__version__, torch.version.cuda,
             torch.cuda.get_device_name(0))
         log("memory: %s", memory_status())
+        if self.family == KLEIN:
+            return self._load_klein(job)
+        from diffusers import (AutoencoderKL, FlowMatchEulerDiscreteScheduler, FluxFillPipeline,
+                               FluxTransformer2DModel, GGUFQuantizationConfig)
+        from transformers import CLIPTextModel, CLIPTokenizer, T5TokenizerFast
         dtype = torch.bfloat16
         cfg = self._path("flux_config_dir")
         t0 = time.time()
@@ -217,10 +222,33 @@ class Engine(object):
         self.pipe.set_progress_bar_config(disable=True)
         log("FLUX.1 Fill loaded in %.1fs", time.time() - t0)
 
-    # -- prompt encoding: T5 is ~9.5 GB, so it visits the GPU only briefly ----
+    def _load_klein(self, job):
+        """FLUX.2 [klein] 4B (Apache 2.0). The 8 GB Qwen3 text encoder stays on disk
+        until a prompt needs reading (see encode), like T5 for FLUX.1."""
+        import torch
+        from diffusers import Flux2KleinInpaintPipeline
+        t0 = time.time()
+        if job:
+            job.progress(0.0, "Loading FLUX.2 [klein] (first time takes a minute)...")
+        self.pipe = Flux2KleinInpaintPipeline.from_pretrained(
+            self._path("model_dir"), text_encoder=None, torch_dtype=torch.bfloat16)
+        self.pipe.to(self.device)
+        if hasattr(self.pipe.vae, "enable_tiling"):
+            self.pipe.vae.enable_tiling()
+        self.pipe.set_progress_bar_config(disable=True)
+        log("FLUX.2 [klein] loaded in %.1fs (distilled: %s)", time.time() - t0,
+            self.pipe.config.get("is_distilled"))
+
+    # -- prompt encoding: the text encoders are big, so they visit the GPU only briefly ----
     def encode(self, prompt, job):
         if prompt in self.embed_cache:
             return self.embed_cache[prompt]
+        if self.family == KLEIN:
+            result = self._encode_klein(prompt, job)
+            if len(self.embed_cache) > 16:
+                self.embed_cache.clear()
+            self.embed_cache[prompt] = result
+            return result
         import torch
         from transformers import T5EncoderModel
         job.progress(0.02, "Reading the prompt...")
@@ -248,6 +276,30 @@ class Engine(object):
             self.embed_cache.clear()
         self.embed_cache[prompt] = result
         return result
+
+    def _encode_klein(self, prompt, job):
+        import torch
+        from transformers import Qwen3ForCausalLM
+        job.progress(0.02, "Reading the prompt...")
+        pipe = self.pipe
+        pipe.transformer.to("cpu")
+        torch.cuda.empty_cache()
+        encoder = None
+        try:
+            encoder = Qwen3ForCausalLM.from_pretrained(
+                os.path.join(self._path("model_dir"), "text_encoder"), torch_dtype=torch.bfloat16,
+                device_map={"": self.device})
+            log("klein text encoder loaded to %s", self.device)
+            pipe.text_encoder = encoder
+            with torch.no_grad():
+                embeds, _ids = pipe.encode_prompt(prompt=prompt, device=self.device,
+                                                  max_sequence_length=512)
+            return (embeds.detach(),)
+        finally:
+            pipe.text_encoder = None
+            del encoder
+            torch.cuda.empty_cache()
+            pipe.transformer.to(self.device)
 
     def run_lama(self, image, mask):
         """image: float32 (H, W, 3) in 0..1, mask: PIL 'L'. Returns float32 (H, W, 3)."""
@@ -293,10 +345,18 @@ class Engine(object):
         gen = torch.Generator("cpu").manual_seed(int(seed))
         import numpy as np
         image = np.clip(image, 0.0, 1.0).astype(np.float32)   # the model's range
-        out = pipe(prompt_embeds=embeds[0], pooled_prompt_embeds=embeds[1], image=image,
-                   mask_image=mask, width=int(width), height=int(height), strength=float(strength),
-                   guidance_scale=float(guidance), num_inference_steps=int(steps), generator=gen,
-                   max_sequence_length=512, callback_on_step_end=on_step, output_type="np")
+        if self.family == KLEIN:
+            # Distilled: no classifier-free guidance, so guidance_scale is 1.
+            out = pipe(prompt_embeds=embeds[0], image=image, mask_image=mask, width=int(width),
+                       height=int(height), strength=float(strength), guidance_scale=1.0,
+                       num_inference_steps=int(steps), generator=gen,
+                       callback_on_step_end=on_step, output_type="np")
+        else:
+            out = pipe(prompt_embeds=embeds[0], pooled_prompt_embeds=embeds[1], image=image,
+                       mask_image=mask, width=int(width), height=int(height),
+                       strength=float(strength), guidance_scale=float(guidance),
+                       num_inference_steps=int(steps), generator=gen, max_sequence_length=512,
+                       callback_on_step_end=on_step, output_type="np")
         job.check()
         log("variation %d: %d steps in %.1fs", done_before + 1, steps, time.time() - t_var)
         return np.asarray(out.images[0], dtype=np.float32)    # float, never 8-bit
@@ -430,6 +490,8 @@ def preload():
         ("torch CUDA init", "import torch; torch.cuda.is_available() and torch.cuda.init()"),
         ("transformers", "import transformers; from transformers import CLIPTextModel, T5EncoderModel"),
         ("diffusers", "from diffusers import FluxFillPipeline, FluxTransformer2DModel, AutoencoderKL"),
+        ("diffusers klein", "try:\n    from diffusers import Flux2KleinInpaintPipeline\n"
+                            "except ImportError:\n    pass"),
         ("PIL / numpy", "import PIL.Image, numpy"),
     ]
     total = time.time()
