@@ -675,6 +675,28 @@ def _add_knobs(group):
         group.addKnob(knob)
 
 
+def _creation_failed(group, exc):
+    """Delete a half-built GenFill group and report the error (log, Script Editor, dialog)."""
+    import traceback
+    from . import log as gflog
+    tb = traceback.format_exc()
+    print("GenFill: could not create the node:\n%s" % tb)
+    try:
+        gflog.exception("could not create the GenerativeFill node")
+    except Exception:
+        pass
+    try:
+        nuke.delete(group)
+    except Exception:
+        pass
+    try:
+        where = gflog.log_path()
+    except Exception:
+        where = "the Script Editor"
+    nuke.message("GenFill couldn't create the node:\n%s: %s\n\nThe full error is in %s. "
+                 "Please include it when reporting this." % (type(exc).__name__, exc, where))
+
+
 def create():
     """Menu entry point: create a GenerativeFill node (selection drawn on the node itself)."""
     selected = nuke.selectedNodes()
@@ -683,11 +705,17 @@ def create():
         n.setSelected(False)
 
     group = nuke.nodes.Group()
-    group.setName(NODE_CLASS_LABEL, uncollide=True)
-    # Knobs first: the internal nodes' expressions reference parent.gf_*,
-    # and Nuke reports "Nothing is named parent.gf_frame" if they don't exist yet.
-    _add_knobs(group)
-    _build_internals(group)
+    try:
+        group.setName(NODE_CLASS_LABEL, uncollide=True)
+        # Knobs first: the internal nodes' expressions reference parent.gf_*,
+        # and Nuke reports "Nothing is named parent.gf_frame" if they don't exist yet.
+        _add_knobs(group)
+        _build_internals(group)
+    except Exception as exc:
+        # Issue #3: a failure here used to leave an empty Group in the script
+        # with no visible error. Remove it and say what went wrong.
+        _creation_failed(group, exc)
+        return None
     group["knobChanged"].setValue(KNOB_CHANGED)
     group["tile_color"].setValue(TILE_COLOR)
     group["label"].setValue("[value gf_info]")
