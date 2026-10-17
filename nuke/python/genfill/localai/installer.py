@@ -19,6 +19,7 @@ Steps (each is safe to re-run; finished work is skipped, downloads resume):
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import shutil
@@ -39,7 +40,12 @@ except ImportError:  # pragma: no cover
     raise
 
 HF = "https://huggingface.co"
-UV_URL = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
+# Pinned so the hash stays valid. SHA-256 from the release's own
+# uv-x86_64-pc-windows-msvc.zip.sha256 file (matches GitHub's asset digest).
+UV_VERSION = "0.12.21"
+UV_URL = ("https://github.com/astral-sh/uv/releases/download/%s/uv-x86_64-pc-windows-msvc.zip"
+          % UV_VERSION)
+UV_SHA256 = "5d223efa0bf00208c3853246af09420419dfbd352536aa6bb8163d6170e23890"
 TORCH_INDEX_BASE = "https://download.pytorch.org/whl/"
 # Newest first. Only the PyTorch CUDA index is used for torch: PyPI's Windows
 # torch wheels are CPU-only, and uv prefers --extra-index-url over --index-url.
@@ -56,6 +62,24 @@ QUANTS = {
     "Q8_0": ("Maximum: full quality, for 24 GB GPUs (12.7 GB model)", 12.7, 20),
 }
 
+# Hugging Face downloads are pinned to a commit so the SHA-256 values below
+# (the LFS sha256 Hugging Face publishes on each file page) can't drift.
+HF_REVISIONS = {
+    "YarvixPA/FLUX.1-Fill-dev-GGUF": "78b83f1da140a4dcd6466580516544e1f6effe3e",
+    "city96/t5-v1_1-xxl-encoder-bf16": "1b9c856aadb864af93c1dcdc226c2774fa67bc86",
+    "openai/clip-vit-large-patch14": "32bd64288804d66eefd0ccbe215aa642df71cc41",
+    "Comfy-Org/Lumina_Image_2.0_Repackaged": "5b072540ef86570fecb8249c505f23d5bdeb88cd",
+}
+FLUX_SHA256 = {
+    "Q4_K_S": "3782c22eda0622d50eb8683d2aa664e8534a8c1e29ce9e91df491cc400944dc8",
+    "Q6_K": "d538635d81ed5eca59fa2f5a7b68709f0b5584d936570a8695e4d1ae4d518a72",
+    "Q8_0": "345ffd7acf39148e391133ae2a2fa7cc3f85e8dd0dbdb4636e760c3e7fe7952d",
+}
+
+
+def hf_url(repo, path):
+    return "%s/%s/resolve/%s/%s" % (HF, repo, HF_REVISIONS[repo], path)
+
 
 def recommended_quant(vram_gb):
     if not vram_gb or vram_gb < 14:
@@ -66,25 +90,33 @@ def recommended_quant(vram_gb):
 
 
 def model_files(quant):
-    """(relative path, url, approx GB) for every model file."""
-    t5 = HF + "/city96/t5-v1_1-xxl-encoder-bf16/resolve/main/"
-    clip = HF + "/openai/clip-vit-large-patch14/resolve/main/"
+    """(relative path, url, approx GB, SHA-256 or None) for every model file."""
+    t5, clip = "city96/t5-v1_1-xxl-encoder-bf16", "openai/clip-vit-large-patch14"
     files = [
         ("models/flux/flux1-fill-dev-%s.gguf" % quant,
-         HF + "/YarvixPA/FLUX.1-Fill-dev-gguf/resolve/main/flux1-fill-dev-%s.gguf" % quant,
-         QUANTS[quant][1]),
-        ("models/t5/model.safetensors", t5 + "model.safetensors", 9.5),
-        ("models/clip/model.safetensors", clip + "model.safetensors", 1.7),
+         hf_url("YarvixPA/FLUX.1-Fill-dev-GGUF", "flux1-fill-dev-%s.gguf" % quant),
+         QUANTS[quant][1], FLUX_SHA256[quant]),
+        ("models/t5/model.safetensors", hf_url(t5, "model.safetensors"), 9.5,
+         "565cb2487351282e8e4dbeb88e63f4ad28217ce0439f5a8e6525a924807d2d9b"),
+        ("models/t5/spiece.model", hf_url(t5, "spiece.model"), 0.0,
+         "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86"),
+        ("models/clip/model.safetensors", hf_url(clip, "model.safetensors"), 1.7,
+         "a2bf730a0c7debf160f7a6b50b3aaf3703e7e88ac73de7a314903141db026dcb"),
         ("models/vae/ae.safetensors",
-         HF + "/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors", 0.33),
+         hf_url("Comfy-Org/Lumina_Image_2.0_Repackaged", "split_files/vae/ae.safetensors"), 0.33,
+         "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"),
+        # TODO: SHA-256 for big-lama.pt. The release publishes no digest; the
+        # author's IOPaint code lists only an MD5 (e3aa4aaa15225a33ec84f9f4bc47e500).
         ("models/lama/big-lama.pt",
-         "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt", 0.2),
+         "https://github.com/Sanster/models/releases/download/add_big_lama/big-lama.pt", 0.2, None),
     ]
-    for name in ("config.json", "special_tokens_map.json", "spiece.model", "tokenizer_config.json"):
-        files.append(("models/t5/" + name, t5 + name, 0.0))
+    # Small tokenizer/config files are plain git files on Hugging Face, which
+    # publishes no SHA-256 for them; the pinned commit in the URL fixes their content.
+    for name in ("config.json", "special_tokens_map.json", "tokenizer_config.json"):
+        files.append(("models/t5/" + name, hf_url(t5, name), 0.0, None))
     for name in ("config.json", "merges.txt", "vocab.json", "tokenizer.json", "tokenizer_config.json",
                  "special_tokens_map.json"):
-        files.append(("models/clip/" + name, clip + name, 0.0))
+        files.append(("models/clip/" + name, hf_url(clip, name), 0.0, None))
     return files
 
 
@@ -233,6 +265,14 @@ def reshard_safetensors(src, out_dir, base_name="model", shard_bytes=SHARD_BYTES
     return paths
 
 
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(8 * 1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def version_tuple(text):
     if not text:
         return None
@@ -321,8 +361,24 @@ class Installer(object):
         if code != 0:
             raise InstallError("%s failed (exit code %s). See the details log." % (label, code))
 
-    def download(self, url, dest, label, approx_gb=0.0, done_gb=0.0, total_gb=0.0):
-        """Resumable download with progress. Skips files that are already complete."""
+    def _verify(self, part, label, sha256):
+        """Check a finished .part file against its expected SHA-256, if one is known."""
+        if not sha256:
+            return
+        self.progress(None, "Checking %s..." % label)
+        actual = sha256_file(part)
+        if actual != sha256.lower():
+            os.remove(part)
+            self.log("SHA-256 mismatch for %s: expected %s, got %s" % (label, sha256, actual))
+            raise InstallError("The download of %s is corrupt or was changed (SHA-256 mismatch). "
+                               "It was deleted; run Install again." % label)
+        self.log("verified SHA-256 of %s" % label)
+
+    def download(self, url, dest, label, approx_gb=0.0, done_gb=0.0, total_gb=0.0, sha256=None):
+        """Resumable download with progress. Skips files that are already complete.
+
+        With ``sha256``, the finished file is checked before it is moved into place.
+        """
         if os.path.exists(dest):
             self.log("already have %s" % os.path.relpath(dest, self.base))
             return
@@ -364,6 +420,7 @@ class Installer(object):
                                           % (label, got / 1e9, size, speed))
                 if total is not None and got < total:
                     raise IOError("connection closed early (%d of %d bytes)" % (got, total))
+                self._verify(part, label, sha256)
                 os.replace(part, dest)
                 self.log("downloaded %s (%.2f GB)" % (os.path.relpath(dest, self.base), got / 1e9))
                 return
@@ -371,6 +428,7 @@ class Installer(object):
                 raise
             except HTTPError as exc:
                 if exc.code == 416 and os.path.exists(part):   # already complete
+                    self._verify(part, label, sha256)
                     os.replace(part, dest)
                     return
                 self.log("download error (attempt %d): HTTP %s" % (attempt, exc.code))
@@ -425,7 +483,7 @@ class Installer(object):
         z = self.path("downloads", "uv.zip")
         if os.path.exists(z):
             os.remove(z)
-        self.download(UV_URL, z, "uv")
+        self.download(UV_URL, z, "uv", sha256=UV_SHA256)
         os.makedirs(os.path.dirname(uv), exist_ok=True)
         with zipfile.ZipFile(z) as zf:
             member = next(n for n in zf.namelist() if n.lower().endswith("uv.exe"))
@@ -597,14 +655,14 @@ class Installer(object):
         files = model_files(self.quant)
         total = sum(f[2] for f in files) or 1.0
         done = 0.0
-        for rel, url, gb in files:
+        for rel, url, gb, sha256 in files:
             dest = self.path(*rel.split("/"))
             index = os.path.join(os.path.dirname(dest), "model.safetensors.index.json")
             if rel.endswith("/model.safetensors") and os.path.exists(index):
                 self.log("already have %s (split into shards)" % rel)
                 done += gb
                 continue
-            self.download(url, dest, os.path.basename(rel), gb, done, total)
+            self.download(url, dest, os.path.basename(rel), gb, done, total, sha256=sha256)
             done += gb
 
     def split_big_weights(self):

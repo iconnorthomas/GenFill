@@ -1,4 +1,5 @@
 """Tests for the in-Nuke Local AI installer (no network, no GPU)."""
+import hashlib
 import json
 import os
 import shutil
@@ -89,9 +90,44 @@ class InstallerTests(unittest.TestCase):
                        "models/t5/spiece.model", "models/clip/model.safetensors",
                        "models/clip/vocab.json"):
             self.assertIn(needed, rels)
-        for _rel, url, _gb in files:
+        for _rel, url, _gb, sha256 in files:
             self.assertNotIn("black-forest-labs", url)   # gated repos need a login
+            self.assertNotIn("/resolve/main/", url)      # pinned so hashes stay valid
+            if sha256 is not None:
+                self.assertRegex(sha256, "^[0-9a-f]{64}$")
         self.assertGreater(inst.estimate_gb("Q4_K_S"), 20)
+        for quant in inst.QUANTS:
+            self.assertRegex(inst.model_files(quant)[0][3], "^[0-9a-f]{64}$")
+        self.assertNotIn("latest", inst.UV_URL)
+        self.assertIn(inst.UV_VERSION, inst.UV_URL)
+        self.assertRegex(inst.UV_SHA256, "^[0-9a-f]{64}$")
+
+    def _serve_payload(self):
+        RangeServer.drop_first[0] = False
+        RangeServer.requests[:] = []
+        srv = HTTPServer(("127.0.0.1", 0), RangeServer)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return "http://127.0.0.1:%d/x" % srv.server_address[1]
+
+    def test_download_accepts_matching_sha256(self):
+        url = self._serve_payload()
+        dest = os.path.join(self.inst.base, "models", "x.bin")
+        self.inst.download(url, dest, "x", sha256=hashlib.sha256(PAYLOAD).hexdigest().upper())
+        with open(dest, "rb") as fh:
+            self.assertEqual(fh.read(), PAYLOAD)
+        self.assertFalse(os.path.exists(dest + ".part"))
+
+    def test_download_rejects_mismatching_sha256(self):
+        url = self._serve_payload()
+        dest = os.path.join(self.inst.base, "models", "x.bin")
+        with self.assertRaises(inst.InstallError) as ctx:
+            self.inst.download(url, dest, "x", sha256=hashlib.sha256(b"something else").hexdigest())
+        self.assertIn("SHA-256", str(ctx.exception))
+        self.assertFalse(os.path.exists(dest))
+        self.assertFalse(os.path.exists(dest + ".part"))
+        self.assertEqual(len(RangeServer.requests), 1)   # no retry loop on a bad hash
 
     def test_configure_writes_configs_manifest_and_config(self):
         cfg_dir = os.path.join(self.tmp, "nukecfg")
