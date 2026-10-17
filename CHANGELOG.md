@@ -14,6 +14,11 @@
 - The node's history and `config.json` tolerate malformed contents instead of raising.
 - `config.json` (API keys) is created owner-only from the start, not chmod-ed after writing.
 - HTTP responses are closed after reading; the User-Agent carries the real GenFill version.
+- **Fix: local AI self-test fails on Windows with "CUDA driver error: unknown error"**
+  ("Failed to create GPU mapping", `cuMemSetAccess`). The helper no longer turns on PyTorch's
+  `expandable_segments` allocator on Windows: recent PyTorch builds implement it with CUDA
+  virtual memory, which WDDM drivers can reject (seen with PyTorch 2.14 cu130, driver 610.88,
+  RTX PRO 6000 Blackwell). Linux keeps it.
 
 ## 0.7.1 - 2026-10-13
 

@@ -65,7 +65,12 @@ def clean_env(extra=None, platform=None):
     env["HF_HUB_OFFLINE"] = "1"          # never phone home from the helper
     env["HF_HUB_DISABLE_TELEMETRY"] = "1"
     env["TOKENIZERS_PARALLELISM"] = "false"
-    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    if not platform.startswith("win"):
+        # Less fragmentation while T5 is loaded and unloaded. Not on Windows:
+        # recent PyTorch builds implement it there with CUDA virtual memory, which
+        # WDDM drivers can reject ("Failed to create GPU mapping", CUDA_ERROR_UNKNOWN
+        # from cuMemSetAccess) on the first allocation; older builds ignored it.
+        env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     if extra:
         env.update(extra)
     return env
