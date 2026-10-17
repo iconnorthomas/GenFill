@@ -386,7 +386,7 @@ class Installer(object):
     def step_check(self):
         os.makedirs(self.base, exist_ok=True)
         from .client import kill_stale_helpers
-        if kill_stale_helpers(self.base):
+        if kill_stale_helpers(self.base, any_owner=True):     # its files may be replaced
             self.log("stopped a leftover AI helper process")
         if "onedrive" in self.base.lower():
             raise InstallError("The install folder is inside OneDrive (%s). ~25 GB would sync to "

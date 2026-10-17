@@ -104,6 +104,25 @@ class HelperTests(unittest.TestCase):
             fresh.stop()
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "logs", "helper.pid")))
 
+    def test_other_programs_leave_our_helper_alone(self):
+        # GenFill Setup closing (or a second Nuke starting a helper) used to kill the
+        # helper named in helper.pid, whoever owned it.
+        self.client.start()
+        pkg = os.path.join(os.path.dirname(__file__), "..", "nuke", "python")
+        code = ("import sys; sys.path.insert(0, %r); from genfill.localai import client; "
+                "print(client.kill_stale_helpers(%r))" % (pkg, self.tmp))
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                             timeout=60)
+        self.assertEqual(out.stdout.strip(), "False", out.stderr)
+        time.sleep(0.5)
+        self.assertTrue(self.client.is_running())                 # survived the other exit
+        forced = code.replace("(%r)" % self.tmp, "(%r, any_owner=True)" % self.tmp)
+        out = subprocess.run([sys.executable, "-c", forced], capture_output=True, text=True,
+                             timeout=60)
+        self.assertEqual(out.stdout.strip(), "True", out.stderr)  # installer may still stop it
+        self.client.proc.wait(10)
+        self.assertFalse(self.client.is_running())
+
     def test_stale_pid_of_unrelated_process_is_not_killed(self):
         # The pid file outlived the helper and the pid now belongs to something else.
         other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])

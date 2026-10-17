@@ -129,14 +129,31 @@ def _is_our_helper(pid):
     return bool(cmdline) and os.path.basename(WORKER_SCRIPT).lower() in cmdline.lower()
 
 
-def kill_stale_helpers(base=None):
-    """Stop a helper left behind by an earlier GenFill load (e.g. after Reload
-    GenFill, or a crash of the Nuke-side code). Returns True if one was killed."""
+def _read_pid_file(path):
+    """(helper pid, owner pid or None). Files from before 0.8 hold only the helper pid."""
+    with open(path) as fh:
+        parts = fh.read().split()
+    pid = int(parts[0]) if parts else 0
+    owner = int(parts[1]) if len(parts) > 1 else None
+    return pid, owner
+
+
+def kill_stale_helpers(base=None, any_owner=False):
+    """Stop a helper left behind by an earlier GenFill load in this process (e.g.
+    after Reload GenFill, or a crash of the Nuke-side code). Returns True if one
+    was killed.
+
+    A helper started by another program (a second Nuke, GenFill Setup) is left
+    alone: it isn't stale, and that program stops it itself. A helper whose owner
+    is gone exits by itself when its stdin closes. ``any_owner`` stops it anyway,
+    for the installer and uninstaller, which replace or delete its files.
+    """
     path = _pid_file(base or root())
     try:
-        with open(path) as fh:
-            pid = int(fh.read().strip() or 0)
+        pid, owner = _read_pid_file(path)
     except (IOError, OSError, ValueError):
+        return False
+    if owner is not None and owner != os.getpid() and not any_owner:
         return False
     killed = False
     if pid and pid != os.getpid() and _is_our_helper(pid):
@@ -215,7 +232,7 @@ class WorkerClient(object):
                                          **hidden_popen_kwargs())
             try:
                 with open(_pid_file(self.base), "w") as fh:
-                    fh.write(str(self.proc.pid))
+                    fh.write("%d %d" % (self.proc.pid, os.getpid()))   # helper, owner
             except (IOError, OSError):
                 pass
             threading.Thread(target=self._read_loop, args=(self.proc,), name="GenFill-helper-reader",
@@ -351,10 +368,16 @@ def get_client():
 
 def stop_helper():
     """Stop the helper now (frees GPU memory). It restarts on the next Generate."""
-    with _client_lock:
-        if _client[0] is not None:
-            _client[0].stop()
+    _stop_own_helper()
     kill_stale_helpers()
 
 
-atexit.register(stop_helper)
+def _stop_own_helper():
+    with _client_lock:
+        if _client[0] is not None:
+            _client[0].stop()
+
+
+# Only the helper this process started: any program that imports this module
+# (GenFill Setup, a second Nuke) used to kill whichever helper helper.pid named.
+atexit.register(_stop_own_helper)

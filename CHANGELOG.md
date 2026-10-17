@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fix: Generate failed with "The AI helper stopped unexpectedly (exit code 1)"** when another
+  program using GenFill's Local AI exited or started a helper, for example GenFill Setup closing or
+  a second Nuke. Every such program killed the helper named in `helper.pid`, even one that belonged
+  to a running Nuke. The pid file now records the helper's owner, and only that owner stops it; the
+  Local AI installer still stops it before replacing its files.
 - **Fix: copy/pasted GenerativeFill nodes shared one cache folder and job.** The copy kept the
   original's uid, so a Generate on one showed as running on both, and deleting a variation on
   one deleted the file the other was still showing. A copy now gets its own uid on its first
