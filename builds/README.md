@@ -39,7 +39,7 @@ the binary matches the code next to it.
 Check a build without clicking through it:
 
 ```bash
-builds/windows/GenFill-Setup-0.7.1-windows.exe --self-test result.json
+builds/windows/GenFill-Setup-0.8.0-windows.exe --self-test result.json
 ```
 
 `result.json` reports whether the bundled plugin, HTTPS, the Local AI installer and the window

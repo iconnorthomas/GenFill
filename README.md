@@ -9,15 +9,19 @@ no 8-bit sRGB export, no clipped highlights.
 
 - **One node, one panel.** The selection, prompt, variations, blend controls and output all
   live on the GenerativeFill node. The Roto tools appear in the Viewer as soon as its panel is open.
-- **Free and local.** FLUX.1 Fill and LaMa run on your NVIDIA GPU inside the plugin. Nothing is
-  uploaded and there are no tokens. Cloud models (Stability AI, OpenAI) are optional.
+- **Free and local.** A FLUX fill model and LaMa run on your NVIDIA GPU inside the plugin. Nothing
+  is uploaded and there are no tokens. Pick **FLUX.2 [klein] 4B** (Apache 2.0, fine for commercial
+  work) or **FLUX.1 Fill [dev]** (best quality, non-commercial). Cloud models (Stability AI, OpenAI)
+  are optional.
+- **Easy install.** GenFill Setup is a graphical installer for Windows, macOS and Linux that
+  installs, updates or removes GenFill and can set up the Local AI in the same window.
 - **Linear-safe.** An invertible color encoding plus 32-bit float transport means generated
   pixels come back into your working space with highlights above 1.0 intact. See
   [Color science](#color-science-a-linear-pipeline-with-display-referred-models).
 - **Farm-safe.** The node is a Group of native Nuke nodes. Once you've picked a variation, the
   script renders anywhere, even where GenFill isn't installed.
 
-Current version: **0.7.1** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **0.8.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ---
 
@@ -73,19 +77,30 @@ and Linux; the `install.bat` scripts are Windows-only.
 
 ### 2. The free local AI (optional, recommended)
 
-In Nuke: **GenFill > Local AI > Install / Repair...** (also the **⚙ Local AI...** button on the
-panel). It runs in the background with a progress dialog and needs:
+Turn on **Set up Local AI** in GenFill Setup, or in Nuke use **GenFill > Local AI > Install /
+Repair...** (also the **⚙ Local AI...** button on the panel). It runs in the background with a
+progress dialog. First choose the model:
+
+| Model | License | Download | Notes |
+|---|---|---|---|
+| **FLUX.2 [klein] 4B** | Apache 2.0: **commercial use OK** | about 16 GB | Fast (4 steps per image). Official Black Forest Labs weights |
+| **FLUX.1 Fill [dev]** | FLUX.1 [dev] **Non-Commercial** | about 19 GB | Best fill quality. You accept its license in the installer |
+
+You can switch later by running the installer again with the other model; it keeps the Python
+environment and LaMa and downloads only the new model. The Local AI needs:
 
 - an NVIDIA GPU with 8 GB+ VRAM (12 GB recommended) and a recent driver,
-- about 25 GB of disk in `%USERPROFILE%\GenFill-LocalAI` (deliberately outside OneDrive),
-- internet for this one-time download only.
+- about 25 GB of disk in `%USERPROFILE%\GenFill-LocalAI` (deliberately outside OneDrive; you can
+  choose another folder),
+- internet for this one-time download only. Every large file is checked against its published
+  SHA-256 before it's used.
 
 It builds a private Python 3.12 with CUDA PyTorch (it never touches Nuke's Python), installs
 diffusers/transformers, downloads the models and runs a GPU self-test. If anything later goes
 wrong (a driver update, a moved folder), run **Install / Repair** again: it only redoes what's
 broken.
 
-The model size is picked from your VRAM and can be changed in the dialog:
+For FLUX.1 Fill, the model size is picked from your VRAM and can be changed in the dialog:
 
 | Size | FLUX.1 Fill model | For |
 |---|---|---|
@@ -197,8 +212,8 @@ variation restores it exactly, even if you've changed the selection or color set
 Nuke (GenFill plugin)                          %USERPROFILE%\GenFill-LocalAI\
   backends/local.py                              env\  private Python 3.12 + CUDA PyTorch
   localai/client.py ── JSON over a private ──▶   localai/worker.py  (hidden helper)
-                       stdin/stdout pipe           FLUX.1 Fill [dev] GGUF (diffusers)
-                                                   T5-XXL + CLIP-L text encoders, FLUX VAE
+                       stdin/stdout pipe           FLUX.2 [klein] 4B + Qwen3 text encoder,
+                                                     or FLUX.1 Fill [dev] GGUF + T5-XXL/CLIP-L
                                                    LaMa (TorchScript)
 ```
 
@@ -207,8 +222,9 @@ Nuke (GenFill plugin)                          %USERPROFILE%\GenFill-LocalAI\
   with Nuke's (CopyCat, Cattery).
 - The helper starts on the first local generation and keeps the model loaded between
   generations. It exits when Nuke closes, after 10 idle minutes, or on **Local AI > Stop AI Helper**.
-- To fit 12 GB, the FLUX model stays on the GPU and the 9.5 GB T5 encoder is loaded only while
-  a new prompt is encoded (prompt encodings are cached). The first generation after the helper starts
+- To fit 12 GB, the FLUX model stays on the GPU and the big text encoder (T5 for FLUX.1, Qwen3
+  for klein, 8-9.5 GB) is loaded only while a new prompt is encoded (prompt encodings are cached).
+  klein works at up to 1 megapixel; larger regions are scaled to fit and back. The first generation after the helper starts
   takes longer while the models load.
 
 ---

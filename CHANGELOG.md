@@ -1,7 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-10-17
 
+- **GenFill Setup: a graphical installer for Windows, macOS and Linux** in GenFill's own dark
+  theme. It installs, updates or removes the plugin it carries, can set up Local AI on Windows in
+  the same window, and offers to start Nuke when it's done. It writes the same files and `init.py`
+  block as `install.ps1`. Built per platform with `python builds/build.py` into `builds/`; inspired
+  by Aleš Ushakou's Windows setup app (#1).
+- **Local AI: choose a commercially licensed model.** Local AI can now install **FLUX.2 [klein] 4B**
+  (Apache 2.0, from Black Forest Labs) instead of FLUX.1 Fill [dev] (non-commercial). Pick it in
+  *Local AI > Install / Repair*; switching keeps the environment and LaMa and downloads only the
+  new model (about 16 GB, pinned and SHA-256 checked). klein runs as a true masked fill
+  (diffusers' `Flux2KleinInpaintPipeline`) in 4 steps. The node's model menu entry is now
+  **Local AI**, which uses whichever model is installed; older scripts keep working.
+- **Local AI downloads are verified.** Model weights and uv are checked against SHA-256 values
+  published by Hugging Face and the uv release before they're used; a mismatch deletes the file
+  and stops the install. Downloads are pinned to fixed commits, and uv to 0.12.21. (LaMa's
+  `big-lama.pt` has no published SHA-256 yet and is not checked.)
+- **Fix: creating a GenerativeFill node could leave an empty Group** (#3). If building the node
+  fails, the half-built Group is now removed and the error is shown and logged, instead of
+  silently leaving a blank Group in the script.
 - **Fix: Generate failed with "The AI helper stopped unexpectedly (exit code 1)"** when another
   program using GenFill's Local AI exited or started a helper, for example GenFill Setup closing or
   a second Nuke. Every such program killed the helper named in `helper.pid`, even one that belonged
@@ -14,27 +32,16 @@
 - **Fix: a stale `helper.pid` could kill an unrelated process.** Before stopping a leftover AI
   helper, GenFill now checks that the process's command line is really `worker.py` (it used to
   accept any Python process on Windows and any process at all on macOS/Linux).
-- A failed Generate (empty selection, missing input) no longer leaves an empty `gNNN_...` folder.
-- Generation numbers are never reused after deleting a generation.
-- The node's history and `config.json` tolerate malformed contents instead of raising.
-- `config.json` (API keys) is created owner-only from the start, not chmod-ed after writing.
-- HTTP responses are closed after reading; the User-Agent carries the real GenFill version.
 - **Fix: local AI self-test fails on Windows with "CUDA driver error: unknown error"**
   ("Failed to create GPU mapping", `cuMemSetAccess`). The helper no longer turns on PyTorch's
   `expandable_segments` allocator on Windows: recent PyTorch builds implement it with CUDA
   virtual memory, which WDDM drivers can reject (seen with PyTorch 2.14 cu130, driver 610.88,
   RTX PRO 6000 Blackwell). Linux keeps it.
-- **GenFill Setup: a graphical installer for Windows, macOS and Linux** in GenFill's own dark
-  theme. It installs, updates or removes the plugin it carries, can set up Local AI on Windows in
-  the same window, and offers to start Nuke when it's done. It writes the same files and `init.py`
-  block as `install.ps1`. Built per platform with `python builds/build.py` into `builds/`; inspired
-  by Aleš Ushakou's Windows setup app (#1).
-- **Local AI: choose a commercially licensed model.** Local AI can now install **FLUX.2 [klein] 4B**
-  (Apache 2.0, from Black Forest Labs) instead of FLUX.1 Fill [dev] (non-commercial). Pick it in
-  *Local AI > Install / Repair*; switching keeps the environment and LaMa and downloads only the
-  new model (about 16 GB, pinned and SHA-256 checked). klein runs as a true masked fill
-  (diffusers' `Flux2KleinInpaintPipeline`) in 4 steps. The node's model menu entry is now
-  **Local AI**, which uses whichever model is installed; older scripts keep working.
+- A failed Generate (empty selection, missing input) no longer leaves an empty `gNNN_...` folder.
+- Generation numbers are never reused after deleting a generation.
+- The node's history and `config.json` tolerate malformed contents instead of raising.
+- `config.json` (API keys) is created owner-only from the start, not chmod-ed after writing.
+- HTTP responses are closed after reading; the User-Agent carries the real GenFill version.
 
 ## 0.7.1 - 2026-10-13
 
