@@ -381,8 +381,8 @@ class SetupWindow(QtWidgets.QWidget):
         card = w.Card(spacing=12)
         self.ai_check = w.Toggle(
             "Set up Local AI",
-            "FLUX.1 Fill and LaMa on your own NVIDIA GPU: free, offline, no accounts. "
-            "About 25 GB; downloads resume if interrupted.")
+            "Generative Fill and LaMa removal on your own NVIDIA GPU: free, offline, no "
+            "accounts. Downloads resume if interrupted.")
         card.lay.addWidget(self.ai_check)
         self.ai_box = QtWidgets.QWidget()
         form = QtWidgets.QGridLayout(self.ai_box)
@@ -390,17 +390,29 @@ class SetupWindow(QtWidgets.QWidget):
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(10)
         form.setColumnStretch(1, 1)
+        self.family_cards = {}
+        cards = QtWidgets.QVBoxLayout()
+        cards.setSpacing(8)
+        for fid, title, desc, badge, good in self._families():
+            c = w.ChoiceCard(title, desc, icon=None, badge=badge, badge_good=good)
+            c.toggled.connect(self._family_changed)
+            self.family_cards[fid] = c
+            cards.addWidget(c)
+        form.addLayout(cards, 0, 0, 1, 2)
         self.gpu_label = label("", "gsMuted")
         self.quant_combo = w.Combo()
+        self.size_name = label("Model size", "gsMuted", wrap=False)
         self.ai_row = FolderRow("")
-        for r, (name, widget) in enumerate((("GPU", self.gpu_label), ("Model size", self.quant_combo),
-                                            ("Folder", self.ai_row))):
-            form.addWidget(label(name, "gsMuted", wrap=False), r, 0, Qt.AlignLeft | Qt.AlignVCenter)
-            form.addWidget(widget, r, 1)
+        form.addWidget(label("GPU", "gsMuted", wrap=False), 1, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        form.addWidget(self.gpu_label, 1, 1)
+        form.addWidget(self.size_name, 2, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        form.addWidget(self.quant_combo, 2, 1)
+        form.addWidget(label("Folder", "gsMuted", wrap=False), 3, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        form.addWidget(self.ai_row, 3, 1)
         self.license_check = w.Toggle("I accept the FLUX.1 [dev] Non-Commercial License")
-        form.addWidget(self.license_check, 3, 0, 1, 2)
-        form.addWidget(label(link(FLUX_LICENSE, "Read the license"), "gsFaint", wrap=False),
-                       4, 0, 1, 2)
+        form.addWidget(self.license_check, 4, 0, 1, 2)
+        self.license_link = label("", "gsFaint")
+        form.addWidget(self.license_link, 5, 0, 1, 2)
         card.lay.addWidget(self.ai_box)
         if WINDOWS:
             self._init_local_ai()
@@ -437,10 +449,53 @@ class SetupWindow(QtWidgets.QWidget):
         b.addStretch(1)
         return page
 
+    def _families(self):
+        """(id, title, description, badge, badge is good) for each Local AI model offered."""
+        from genfill.localai import installer as inst
+        fams = getattr(inst, "FAMILIES", None)
+        if not fams:                                   # a plugin from before 0.8
+            return [("flux1-fill", "FLUX.1 Fill [dev]", "Best fill quality. About 25 GB.",
+                     "NON-COMMERCIAL", False)]
+        out = []
+        for fid in (inst.KLEIN, inst.FLUX1):
+            f = fams[fid]
+            size = "About %.0f GB." % (inst.estimate_gb("Q4_K_S", fid) - 7)
+            out.append((fid, f["label"], "%s %s" % (f["summary"], size),
+                        "COMMERCIAL USE OK" if f["commercial"] else "NON-COMMERCIAL",
+                        f["commercial"]))
+        return out
+
+    def family(self):
+        for fid, card in self.family_cards.items():
+            if card.isChecked():
+                return fid
+        return "flux1-fill"
+
+    def _family_changed(self, *args):
+        from genfill.localai import installer as inst
+        fid = self.family()
+        flux1 = fid == "flux1-fill"
+        self.size_name.setVisible(flux1)
+        self.quant_combo.setVisible(flux1)
+        self.license_check.setVisible(flux1)
+        fams = getattr(inst, "FAMILIES", {})
+        f = fams.get(fid, {"license": "FLUX.1 [dev] Non-Commercial License",
+                           "license_url": FLUX_LICENSE})
+        if flux1:
+            self.license_link.setText(link(f["license_url"], "Read the license"))
+        else:
+            self.license_link.setText("Licensed under the %s, so you can use it in commercial "
+                                      "work. %s" % (f["license"], link(f["license_url"],
+                                                                       "Read the license")))
+        self._refresh_buttons()
+
     def _init_local_ai(self):
         from genfill import localai
         from genfill.localai import installer as inst
         self.ai_row.edit.setText(localai.root())
+        current = localai.family() if localai.manifest() and hasattr(localai, "family") else None
+        default = current or ("flux2-klein" if "flux2-klein" in self.family_cards else "flux1-fill")
+        self.family_cards[default].setChecked(True)
         name, vram = inst.detect_gpu()
         self.gpu_label.setText("%s &middot; %.0f GB" % (name, vram) if name else
                                "No NVIDIA GPU detected. Local AI needs one.")
@@ -562,7 +617,8 @@ class SetupWindow(QtWidgets.QWidget):
                 self.next_btn.setEnabled(True)
             else:
                 self.next_btn.setText("Update" if self.installed else "Install")
-                need_license = self.ai_check.isChecked() and not self.license_check.isChecked()
+                need_license = (self.ai_check.isChecked() and self.family() == "flux1-fill"
+                                and not self.license_check.isChecked())
                 self.next_btn.setEnabled(not need_license)
                 if need_license:
                     hint = "Accept the FLUX.1 [dev] license to set up Local AI."
@@ -631,8 +687,12 @@ class SetupWindow(QtWidgets.QWidget):
         if with_ai:
             from genfill.localai import installer as inst
             ai_root = self.ai_row.path()
-            labels += [text for _key, text in inst.Installer.STEPS]
+            family = self.family()
+            steps = inst.Installer.steps_for(family) if hasattr(inst.Installer, "steps_for") \
+                else inst.Installer.STEPS
+            labels += [text for _key, text in steps]
             quant = self.quant_combo.currentData()
+            extra = {"family": family} if hasattr(inst, "FAMILIES") else {}
         steps = float(len(labels))
 
         def job(emit):
@@ -660,7 +720,7 @@ class SetupWindow(QtWidgets.QWidget):
                     final["message"] = kw.get("message", "")
                 else:
                     emit(kind, **kw)
-            self.installer = inst.Installer(base=ai_root, quant=quant, on_event=on_ai)
+            self.installer = inst.Installer(base=ai_root, quant=quant, on_event=on_ai, **extra)
             ok = self.installer.run()
             msg = final["message"]
             if ok:
