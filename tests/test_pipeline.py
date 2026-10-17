@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import fake_nuke  # noqa: E402
@@ -89,6 +90,18 @@ class PipelineTests(unittest.TestCase):
         self.assertIs(g.node(gfnode.OUT_SWITCH).input(1), g.node(gfnode.LAYER))
         self.assertEqual(g["gf_output"].value(), "Layer")
         self.assertFalse(gfnode.ensure_current(g))      # idempotent
+
+    def test_failed_build_leaves_no_empty_group(self):
+        # Issue #3: an error while building used to leave a blank Group behind.
+        before = list(gfnode.nuke.allNodes())
+        messages = []
+        with mock.patch.object(gfnode, "_build_internals", side_effect=RuntimeError("boom")), \
+                mock.patch.object(gfnode.nuke, "message", messages.append):
+            self.assertIsNone(gfnode.create())
+        self.assertEqual(gfnode.nuke.allNodes(), before)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("RuntimeError: boom", messages[0])
+        self.assertIs(gfnode.create().Class(), self.g.Class())   # still works afterwards
 
     def test_empty_shapes_explains_what_to_do(self):
         g = self.g
