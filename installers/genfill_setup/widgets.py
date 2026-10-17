@@ -342,14 +342,16 @@ class Toggle(QtWidgets.QAbstractButton):
 class ChoiceCard(QtWidgets.QAbstractButton):
     """A large selectable card with an icon, a title and a description (radio-style)."""
 
-    def __init__(self, title, description, icon="sparkle", parent=None):
+    def __init__(self, title, description, icon="sparkle", parent=None, badge=None,
+                 badge_good=True):
         super(ChoiceCard, self).__init__(parent)
         self.setCheckable(True)
         self.setAutoExclusive(True)
         self.setCursor(Qt.PointingHandCursor)
         self._title, self._desc, self._icon = title, description, icon
+        self._badge, self._badge_good = badge, badge_good
         self._hover = False
-        self.setMinimumHeight(84)
+        self.setMinimumHeight(84 if icon else 74)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
 
     def enterEvent(self, e):
@@ -384,10 +386,12 @@ class ChoiceCard(QtWidgets.QAbstractButton):
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(r, 14, 14)
 
-        # icon chip
+        # icon chip (none on compact cards)
         chip = QtCore.QRectF(r.left() + 18, r.center().y() - 20, 40, 40)
         p.setPen(Qt.NoPen)
-        if self._icon == "sparkle":
+        if not self._icon:
+            chip = QtCore.QRectF(r.left() + 2, r.center().y(), 0, 0)
+        elif self._icon == "sparkle":
             p.setBrush(accent_gradient(chip) if on else QtGui.QBrush(QtGui.QColor(255, 255, 255, 18)))
             p.drawRoundedRect(chip, 11, 11)
             p.drawPixmap(chip.adjusted(10, 10, -10, -10).toRect(),
@@ -424,6 +428,23 @@ class ChoiceCard(QtWidgets.QAbstractButton):
         p.setFont(tf)
         p.setPen(TEXT)
         p.drawText(QtCore.QRectF(text_left, top, text_w, fm.height()), Qt.AlignLeft, self._title)
+        if self._badge:
+            bf = QtGui.QFont(self.font())
+            bf.setPointSizeF(max(7.0, self.font().pointSizeF() - 2))
+            bf.setWeight(QtGui.QFont.DemiBold)
+            bm = QtGui.QFontMetrics(bf)
+            bw = bm.horizontalAdvance(self._badge) + 14
+            bx = text_left + fm.horizontalAdvance(self._title) + 10
+            badge = QtCore.QRectF(bx, top + (fm.height() - 18) / 2, bw, 18)
+            col = GOOD if self._badge_good else QtGui.QColor("#f3c46b")
+            fill = QtGui.QColor(col)
+            fill.setAlpha(36)
+            p.setPen(Qt.NoPen)
+            p.setBrush(fill)
+            p.drawRoundedRect(badge, 9, 9)
+            p.setFont(bf)
+            p.setPen(col)
+            p.drawText(badge, Qt.AlignCenter, self._badge)
         p.setFont(self.font())
         p.setPen(MUTED)
         p.drawText(QtCore.QRectF(text_left, top + fm.height() + 4, text_w, desc_h + 4),
