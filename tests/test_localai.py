@@ -192,6 +192,29 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(b._steps("high"), 8)
         self.assertEqual(localai.family(self.tmp), "flux1-fill")     # no manifest: old default
 
+    def test_klein_stays_within_one_megapixel(self):
+        # 864x1216 (just over 1 MP) made diffusers' klein pipeline resize the float array
+        # itself, which failed: "expected input[1216, 1, 1024, 864] to have 3 channels".
+        b = local.LocalBackend()
+        sizes = [(543, 697), (697, 543), (1920, 1080), (300, 900), (1000, 1000), (4000, 1000)]
+        with mock.patch.object(localai, "family", return_value="flux2-klein"):
+            for w, h in sizes:
+                mw, mh = b.model_size(w, h)
+                self.assertLessEqual(mw * mh, local.KLEIN_MAX_PIXELS, (w, h, mw, mh))
+                self.assertEqual((mw % 64, mh % 64), (0, 0))
+                fw, fh = local.region.scale_to_pixel_budget(w, h, 1024 * 1024, 64, min_side=512,
+                                                            max_side=1536, max_aspect=3.0)
+                self.assertGreater(mw * mh, 0.8 * min(fw * fh, local.KLEIN_MAX_PIXELS))
+        with mock.patch.object(localai, "family", return_value="flux1-fill"):
+            self.assertEqual(b.model_size(864, 1216), local.region.scale_to_pixel_budget(
+                864, 1216, 1024 * 1024, 64, min_side=512, max_side=1536, max_aspect=3.0))
+        from genfill.localai import worker
+        for w, h in ((864, 1216), (1536, 512), (1024, 1024), (512, 512)):
+            kw, kh = worker.klein_size(w, h)
+            self.assertLessEqual(kw * kh, worker.KLEIN_MAX_PIXELS)
+            self.assertEqual((kw % 16, kh % 16), (0, 0))
+        self.assertEqual(worker.klein_size(512, 512), (512, 512))
+
     def test_is_installed_requires_manifest_and_files(self):
         self.assertFalse(localai.is_installed(self.tmp))
         os.makedirs(os.path.dirname(localai.env_python(self.tmp)))

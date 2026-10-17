@@ -24,6 +24,9 @@ DESCRIPTIONS = {
                     "removal. Apache 2.0: licensed for commercial and studio work."),
 }
 MAX_SEED = 2 ** 32 - 1
+# Flux2KleinInpaintPipeline shrinks anything over 1024 x 1024 pixels itself (and
+# diffusers 0.41 mangles float arrays when it does), so klein stays at or under it.
+KLEIN_MAX_PIXELS = 1024 * 1024
 
 
 class NotInstalled(BackendError):
@@ -55,8 +58,14 @@ class LocalBackend(Backend):
 
     def model_size(self, width, height, model=""):
         # FLUX works best around 1 MP; keep sides on a 64 px grid.
-        return region.scale_to_pixel_budget(width, height, 1024 * 1024, 64, min_side=512,
-                                            max_side=1536, max_aspect=3.0)
+        budget = 1024 * 1024
+        while True:
+            w, h = region.scale_to_pixel_budget(width, height, budget, 64, min_side=512,
+                                                max_side=1536, max_aspect=3.0)
+            # Rounding to the grid can land just over 1 MP (e.g. 864 x 1216).
+            if self.family() != "flux2-klein" or w * h <= KLEIN_MAX_PIXELS or budget < 256 * 256:
+                return w, h
+            budget *= 0.96
 
     def _steps(self, quality):
         table = KLEIN_STEPS if self.family() == "flux2-klein" else QUALITY_STEPS

@@ -153,6 +153,15 @@ class Job(object):
 # --------------------------------------------------------------------------
 
 FLUX1, KLEIN = "flux1-fill", "flux2-klein"
+KLEIN_MAX_PIXELS = 1024 * 1024
+
+
+def klein_size(width, height):
+    """Largest size with the same aspect, at most 1 MP, on klein's 16 px grid."""
+    scale = min(1.0, (KLEIN_MAX_PIXELS / float(width * height)) ** 0.5)
+    w = max(16, int(width * scale) // 16 * 16)
+    h = max(16, int(height * scale) // 16 * 16)
+    return w, h
 
 class Engine(object):
     def __init__(self, root):
@@ -346,11 +355,26 @@ class Engine(object):
         import numpy as np
         image = np.clip(image, 0.0, 1.0).astype(np.float32)   # the model's range
         if self.family == KLEIN:
+            # The pipeline works at the input image's own size and shrinks anything over
+            # 1 MP itself, which diffusers 0.41 gets wrong for (H, W, C) float arrays. So
+            # resize here when needed, pass a (1, H, W, C) batch, and scale the result back.
+            kw, kh = klein_size(int(width), int(height))
+            k_image, k_mask = image, mask
+            if (kw, kh) != (int(width), int(height)):
+                log("klein: working at %dx%d instead of %dx%d (1 MP limit)", kw, kh, width, height)
+                k_image = resize_float(image, kw, kh)
+                k_mask = mask.resize((kw, kh))
             # Distilled: no classifier-free guidance, so guidance_scale is 1.
-            out = pipe(prompt_embeds=embeds[0], image=image, mask_image=mask, width=int(width),
-                       height=int(height), strength=float(strength), guidance_scale=1.0,
+            out = pipe(prompt_embeds=embeds[0], image=k_image[None], mask_image=k_mask,
+                       width=kw, height=kh, strength=float(strength), guidance_scale=1.0,
                        num_inference_steps=int(steps), generator=gen,
                        callback_on_step_end=on_step, output_type="np")
+            if (kw, kh) != (int(width), int(height)):
+                job.check()
+                result = resize_float(np.asarray(out.images[0], dtype=np.float32),
+                                      int(width), int(height))
+                log("variation %d: %d steps in %.1fs", done_before + 1, steps, time.time() - t_var)
+                return np.clip(result, 0.0, 1.0).astype(np.float32)
         else:
             out = pipe(prompt_embeds=embeds[0], pooled_prompt_embeds=embeds[1], image=image,
                        mask_image=mask, width=int(width), height=int(height),
