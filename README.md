@@ -179,8 +179,9 @@ variation restores it exactly, even if you've changed the selection or color set
 
 | Model | Good at | Notes |
 |---|---|---|
-| **Local: FLUX.1 Fill [dev]** (default) | High-quality fills, adding objects; free, offline | Your NVIDIA GPU, a hidden helper process (no windows, no ComfyUI). Float in, float out. **Non-commercial license** |
-| Local removal (empty prompt) | Clean plates | Variation 1 is **LaMa** (fast, faithful); later variations run FLUX.1 Fill from the LaMa result at strength 0.8 for natural texture |
+| **Local AI: FLUX.1 Fill [dev]** | Highest-quality fills, adding objects; free, offline | Your NVIDIA GPU, a hidden helper process (no windows, no ComfyUI). Float in, float out. **Non-commercial license** |
+| **Local AI: FLUX.2 [klein] 4B** | Fast fills (4 steps); free, offline | Same helper and float pipeline. **Apache 2.0: licensed for commercial and studio work.** About 16 GB download; needs ~12 GB of VRAM |
+| Local removal (empty prompt) | Clean plates | Variation 1 is **LaMa** (fast, faithful); later variations run the installed fill model from the LaMa result at strength 0.8 for natural texture |
 | Stability AI | Masked inpainting; *Erase* for removal | Cloud, paid. 8-bit |
 | OpenAI GPT Image | Prompt following | Cloud, paid. Re-renders the crop; GenFill composites it back through the mask. 8-bit |
 | Offline Preview | Testing the pipeline | No AI; smears surrounding color into the selection |
@@ -507,6 +508,10 @@ generate → select → delete flow are tested with the offline backend. Interna
   The model may only be used non-commercially (personal, research, evaluation); read the license
   for the terms on outputs before using them in paid work. GenFill downloads a community GGUF
   quantization of it.
+- **FLUX.2 [klein] 4B**: [Apache License 2.0](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/blob/main/LICENSE.md),
+  so it can be used in commercial work. GenFill downloads the official weights from Black Forest
+  Labs, pinned to a commit and checked against their SHA-256. (The larger klein 9B is *not*
+  Apache 2.0 and is not used.) Choose it in **Local AI > Install / Repair** or in GenFill Setup.
 - **LaMa**: Apache 2.0.
 - T5 / CLIP text encoders: Apache 2.0 / MIT.
 - Cloud backends: governed by your agreement with that provider.

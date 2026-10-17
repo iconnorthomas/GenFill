@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Local AI: choose a commercially licensed model.** Local AI can now install **FLUX.2 [klein] 4B**
+  (Apache 2.0, from Black Forest Labs) instead of FLUX.1 Fill [dev] (non-commercial). Pick it in
+  *Local AI > Install / Repair*; switching keeps the environment and LaMa and downloads only the
+  new model (about 16 GB, pinned and SHA-256 checked). klein runs as a true masked fill
+  (diffusers' `Flux2KleinInpaintPipeline`) in 4 steps. The node's model menu entry is now
+  **Local AI**, which uses whichever model is installed; older scripts keep working.
+
 ## 0.7.1 - 2026-10-13
 
 - README rewritten for the current build, with a full colour science section (encode / generate /
