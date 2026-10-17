@@ -752,7 +752,10 @@ class SetupWindow(QtWidgets.QWidget):
             if rm_ai:
                 emit("step", index=i, state="running")
                 from genfill.localai.client import kill_stale_helpers
-                kill_stale_helpers(ai_root)
+                try:            # its files are about to be deleted, whoever started it
+                    kill_stale_helpers(ai_root, any_owner=True)
+                except TypeError:                   # a plugin from before 0.8
+                    kill_stale_helpers(ai_root)
                 core.uninstall(target, remove_ai_root=ai_root, log=log)
                 emit("step", index=i, state="done")
                 i += 1
