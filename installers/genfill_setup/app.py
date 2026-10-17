@@ -2,7 +2,8 @@
 
 Installs (or updates / removes) the GenFill plugin bundled inside this app, and
 on Windows can also set up Local AI by running GenFill's own Local AI installer.
-The look comes from the plugin itself (genfill.ui.style and the sparkle icon).
+The colours and the sparkle come from the plugin itself (genfill.ui); the
+painted, animated pieces live in widgets.py.
 """
 from __future__ import annotations
 
@@ -17,84 +18,69 @@ from . import core
 core.use_bundled_genfill()
 
 from genfill.ui import style  # noqa: E402
-from genfill.ui.panel import sparkle_pixmap  # noqa: E402
 from genfill.ui.qt import QtCore, QtGui, QtWidgets, Qt  # noqa: E402
 
-PENDING, RUNNING, DONE, FAILED, SKIPPED = u"○", u"◔", u"✓", u"✕", u"–"
-STEP_COLORS = {"pending": "#7a7a7a", "running": "#ffffff", "done": "#7fd17f",
-               "failed": style.ERROR, "skipped": "#5f5f5f"}
-STEP_GLYPHS = {"pending": PENDING, "running": RUNNING, "done": DONE, "failed": FAILED,
-               "skipped": SKIPPED}
-TILE_TOP, TILE_BOTTOM = "#6a5cff", "#3b63fb"          # node tile purple into the accent blue
+from . import widgets as w  # noqa: E402
+from .widgets import logo_pixmap  # noqa: E402,F401  (build.py renders the icon from it)
+
 LOG_PATH = os.path.join(tempfile.gettempdir(), "GenFill-Setup.log")
 WINDOWS = sys.platform.startswith("win")
 FLUX_LICENSE = "https://huggingface.co/black-forest-labs/FLUX.1-Fill-dev/blob/main/LICENSE.md"
+LINK = "#9db0ff"
 
-STYLESHEET = style.STYLESHEET + """
-QWidget#gsRoot {{ background: {bg}; font-family: {font}; }}
-QWidget#gsRoot QLabel {{ color: #dcdcdc; font-size: 12px; }}
-QFrame#gsHeader {{ background: {bar}; border-bottom: 1px solid #383838; }}
-QWidget#gsRoot QLabel#gsAppName {{ color: #f4f4f4; font-size: 17px; font-weight: 600; }}
-QWidget#gsRoot QLabel#gsHeadline {{ color: #f4f4f4; font-size: 20px; font-weight: 600; }}
-QWidget#gsRoot QLabel#gsCrumb {{ color: #6f6f6f; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; }}
-QWidget#gsRoot QLabel#gsCrumb[current="true"] {{ color: #f0f0f0; }}
-QFrame#gsCard {{ background: #232323; border: 1px solid #383838; border-radius: 10px; }}
-QFrame#gsCard QLabel {{ background: transparent; }}
-QWidget#gsRoot QLabel#gfSection {{ color: {muted}; font-size: 11px; font-weight: 600; }}
-QWidget#gsRoot QLabel#gfMuted {{ color: {muted}; font-size: 12px; }}
-QWidget#gsRoot QLabel#gfError {{ color: {error}; font-size: 12px; }}
-QFrame#gsFooter {{ background: {bg}; border-top: 1px solid #383838; }}
-QPushButton {{ background: #3a3a3a; color: #e8e8e8; border: 1px solid #4a4a4a;
-              border-radius: 15px; padding: 6px 18px; font-size: 12px; min-height: 18px; }}
-QPushButton:hover {{ background: #454545; }}
-QPushButton:disabled {{ color: #6a6a6a; border-color: #3c3c3c; }}
-QPushButton#gfGenerate {{ padding: 6px 20px; }}
-QPushButton#gsLink {{ background: transparent; border: none; color: #8fa6ff; padding: 4px 2px; }}
-QPushButton#gsLink:hover {{ color: #b3c2ff; }}
-QLineEdit {{ background: #1f1f1f; color: {text}; border: 1px solid #444; border-radius: 6px;
-            padding: 5px 8px; selection-background-color: {accent}; }}
-QLineEdit:focus {{ border-color: {accent}; }}
-QCheckBox, QRadioButton {{ color: #e2e2e2; font-size: 12px; spacing: 8px; }}
-QCheckBox::indicator, QRadioButton::indicator {{ width: 15px; height: 15px; }}
-QCheckBox::indicator {{ border: 1px solid #5a5a5a; border-radius: 4px; background: #1f1f1f; }}
-QCheckBox::indicator:checked {{ background: {accent}; border-color: {accent}; }}
-QRadioButton::indicator {{ border: 1px solid #5a5a5a; border-radius: 8px; background: #1f1f1f; }}
-QRadioButton::indicator:checked {{ background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,
-    fx:0.5, fy:0.5, stop:0 {accent}, stop:0.45 {accent}, stop:0.55 #1f1f1f, stop:1 #1f1f1f);
-    border-color: {accent}; }}
-QPlainTextEdit {{ background: #1b1b1b; color: #b8b8b8; border: 1px solid #383838;
-                 border-radius: 6px; font-family: Consolas, Menlo, monospace; font-size: 11px; }}
-QScrollBar:vertical {{ background: transparent; width: 10px; }}
-QScrollBar::handle:vertical {{ background: #4a4a4a; border-radius: 4px; min-height: 24px; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
-""".format(bg=style.BG, bar=style.BAR, font=style.FONT_STACK, text=style.FIELD_TEXT,
-           accent=style.ACCENT, muted=style.MUTED, error=style.ERROR)
-
-
-# --------------------------------------------------------------------------
-# artwork
-# --------------------------------------------------------------------------
-
-def logo_pixmap(size):
-    """GenFill's app icon: the white sparkle on a purple-to-blue rounded tile."""
-    dpr = 2
-    pm = QtGui.QPixmap(size * dpr, size * dpr)
-    pm.fill(Qt.transparent)
-    p = QtGui.QPainter(pm)
-    p.setRenderHint(QtGui.QPainter.Antialiasing)
-    s = size * dpr
-    grad = QtGui.QLinearGradient(0, 0, s, s)
-    grad.setColorAt(0.0, QtGui.QColor(TILE_TOP))
-    grad.setColorAt(1.0, QtGui.QColor(TILE_BOTTOM))
-    p.setPen(Qt.NoPen)
-    p.setBrush(grad)
-    p.drawRoundedRect(QtCore.QRectF(0, 0, s, s), s * 0.22, s * 0.22)
-    inset = int(s * 0.2)
-    p.drawPixmap(QtCore.QRect(inset, inset, s - 2 * inset, s - 2 * inset),
-                 sparkle_pixmap(size, "#ffffff"))
-    p.end()
-    pm.setDevicePixelRatio(dpr)
-    return pm
+STYLESHEET = """
+QWidget {{ color: #e6e6ea; }}
+QWidget#gsRoot, QDialog#gsRoot {{ background: #1b1b1f; }}
+QLabel {{ background: transparent; }}
+QLabel#gsEyebrow {{ color: #8f9cff; font-size: 11px; font-weight: 600; letter-spacing: 1.2px; }}
+QLabel#gsTitle {{ color: #f4f4f6; font-size: 25px; font-weight: 600; }}
+QLabel#gsSubtitle {{ color: #a3a3ad; font-size: 13px; }}
+QLabel#gsAppName {{ color: #f4f4f6; font-size: 16px; font-weight: 600; }}
+QLabel#gsMuted {{ color: #9b9ba3; }}
+QLabel#gsFaint {{ color: #6c6c76; font-size: 11px; }}
+QLabel#gsSection {{ color: #8b8b95; font-size: 11px; font-weight: 600; letter-spacing: 0.8px; }}
+QLabel#gsError {{ color: {error}; }}
+QLabel#gsWarn {{ color: #f3c46b; }}
+QLabel#gsChip {{ background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+                 border-radius: 11px; padding: 3px 10px; color: #d6d6dc; font-size: 11px; }}
+QLabel#gsChipAccent {{ background: rgba(91,99,255,0.16); border: 1px solid rgba(122,140,255,0.35);
+                       border-radius: 11px; padding: 3px 10px; color: #c9d1ff; font-size: 11px; }}
+QFrame#gsCard {{ background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.07);
+                 border-radius: 14px; }}
+QFrame#gsDivider {{ background: rgba(255,255,255,0.07); max-height: 1px; min-height: 1px; }}
+QPushButton#gsGhost {{ background: transparent; color: #d8d8de; border: 1px solid rgba(255,255,255,0.14);
+                       border-radius: 18px; padding: 0 18px; font-size: 12px; }}
+QPushButton#gsGhost:hover {{ background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.22); }}
+QPushButton#gsGhost:disabled {{ color: #66666e; border-color: rgba(255,255,255,0.06); }}
+QPushButton#gsLink {{ background: transparent; border: none; color: {link}; padding: 2px 0;
+                      text-align: left; font-size: 12px; }}
+QPushButton#gsLink:hover {{ color: #c3cdff; }}
+QPushButton#gsLaunch {{ background: rgba(255,255,255,0.05); color: #ececf0;
+                        border: 1px solid rgba(255,255,255,0.10); border-radius: 12px;
+                        padding: 10px 16px; font-size: 12px; font-weight: 600; text-align: left; }}
+QPushButton#gsLaunch:hover {{ background: rgba(91,99,255,0.14); border-color: rgba(122,140,255,0.45); }}
+QLineEdit {{ background: rgba(0,0,0,0.28); color: #ececf0; border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 9px; padding: 0 10px; min-height: 34px; selection-background-color: {accent}; }}
+QLineEdit:focus {{ border-color: rgba(122,140,255,0.8); }}
+QLineEdit:disabled {{ color: #6c6c76; }}
+QComboBox {{ background: rgba(0,0,0,0.28); color: #ececf0; border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 9px; padding: 0 30px 0 10px; min-height: 34px; }}
+QComboBox:hover {{ border-color: rgba(255,255,255,0.2); }}
+QComboBox:disabled {{ color: #6c6c76; }}
+QComboBox::drop-down {{ border: none; width: 26px; }}
+QComboBox QAbstractItemView {{ background: #232328; color: #ececf0; border: 1px solid #3a3a42;
+                               selection-background-color: {accent}; outline: none; padding: 4px; }}
+QPlainTextEdit {{ background: rgba(0,0,0,0.35); color: #b4b4bc; border: 1px solid rgba(255,255,255,0.07);
+                 border-radius: 10px; padding: 6px; font-family: Consolas, Menlo, monospace;
+                 font-size: 11px; }}
+QScrollArea {{ background: transparent; border: none; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: rgba(255,255,255,0.14); border-radius: 3px; min-height: 30px; }}
+QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{
+    height: 0; background: none; }}
+QToolTip {{ background: #232328; color: #ececf0; border: 1px solid #3a3a42; padding: 4px 8px; }}
+""".format(error=style.ERROR, accent=style.ACCENT, link=LINK)
 
 
 def app_icon():
@@ -102,6 +88,23 @@ def app_icon():
     for size in (16, 24, 32, 48, 64, 128, 256):
         icon.addPixmap(logo_pixmap(size))
     return icon
+
+
+def apply_app_font(app):
+    font = QtGui.QFont(app.font())
+    if WINDOWS:
+        families = ["Segoe UI Variable Text", "Segoe UI"]
+    elif sys.platform == "darwin":
+        families = [".AppleSystemUIFont", "SF Pro Text", "Helvetica Neue"]
+    else:
+        families = ["Inter", "Cantarell", "Noto Sans", "DejaVu Sans"]
+    if hasattr(font, "setFamilies"):
+        font.setFamilies(families)
+    else:
+        font.setFamily(families[0])
+    font.setPointSizeF(10 if WINDOWS else 12.5 if sys.platform == "darwin" else 10)
+    font.setHintingPreference(QtGui.QFont.PreferNoHinting)
+    app.setFont(font)
 
 
 # --------------------------------------------------------------------------
@@ -130,26 +133,29 @@ class Worker(QtCore.QThread):
 
 
 # --------------------------------------------------------------------------
-# widgets
+# small helpers
 # --------------------------------------------------------------------------
 
-def _label(text, name=None, wrap=True):
+def label(text, name=None, wrap=True, selectable=False):
     lab = QtWidgets.QLabel(text)
     if name:
         lab.setObjectName(name)
     lab.setWordWrap(wrap)
     lab.setTextFormat(Qt.RichText)
     lab.setOpenExternalLinks(True)
+    if selectable:
+        lab.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
     return lab
 
 
-def _card():
-    card = QtWidgets.QFrame()
-    card.setObjectName("gsCard")
-    lay = QtWidgets.QVBoxLayout(card)
-    lay.setContentsMargins(16, 14, 16, 14)
-    lay.setSpacing(8)
-    return card, lay
+def link(url, text):
+    return '<a href="%s" style="color:%s; text-decoration:none">%s</a>' % (url, LINK, text)
+
+
+def divider():
+    line = QtWidgets.QFrame()
+    line.setObjectName("gsDivider")
+    return line
 
 
 class FolderRow(QtWidgets.QWidget):
@@ -157,11 +163,13 @@ class FolderRow(QtWidgets.QWidget):
         super(FolderRow, self).__init__(parent)
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
         self.edit = QtWidgets.QLineEdit(path)
         lay.addWidget(self.edit, 1)
-        btn = QtWidgets.QPushButton("Browse...")
-        btn.clicked.connect(self._browse)
-        lay.addWidget(btn)
+        self.browse = w.GhostButton("Browse")
+        self.browse.setFixedHeight(36)
+        self.browse.clicked.connect(self._browse)
+        lay.addWidget(self.browse)
 
     def _browse(self):
         start = os.path.dirname(self.path())
@@ -176,12 +184,51 @@ class FolderRow(QtWidgets.QWidget):
         return os.path.abspath(os.path.expanduser(self.edit.text().strip()))
 
 
+class Page(QtWidgets.QWidget):
+    """A page: eyebrow, title and subtitle, then a scrollable body."""
+
+    def __init__(self, eyebrow, title, subtitle="", parent=None):
+        super(Page, self).__init__(parent)
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(40, 34, 40, 0)
+        outer.setSpacing(0)
+        self.eyebrow = label(eyebrow, "gsEyebrow", wrap=False)
+        self.title = label(title, "gsTitle")
+        self.subtitle = label(subtitle, "gsSubtitle")
+        outer.addWidget(self.eyebrow)
+        outer.addSpacing(6)
+        outer.addWidget(self.title)
+        outer.addSpacing(6)
+        outer.addWidget(self.subtitle)
+        self.subtitle.setVisible(bool(subtitle))
+        outer.addSpacing(22)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        body = QtWidgets.QWidget()
+        self.body = QtWidgets.QVBoxLayout(body)
+        self.body.setContentsMargins(0, 0, 6, 16)
+        self.body.setSpacing(14)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+
+    def set_header(self, eyebrow=None, title=None, subtitle=None):
+        if eyebrow is not None:
+            self.eyebrow.setText(eyebrow)
+        if title is not None:
+            self.title.setText(title)
+        if subtitle is not None:
+            self.subtitle.setText(subtitle)
+            self.subtitle.setVisible(bool(subtitle))
+
+
 # --------------------------------------------------------------------------
 # main window
 # --------------------------------------------------------------------------
 
 class SetupWindow(QtWidgets.QWidget):
-    CRUMBS = ["WELCOME", "OPTIONS", "INSTALL", "DONE"]
+    STAGES = ["Welcome", "Options", "Install", "Done"]
 
     def __init__(self):
         super(SetupWindow, self).__init__()
@@ -189,13 +236,14 @@ class SetupWindow(QtWidgets.QWidget):
         self.setStyleSheet(STYLESHEET)
         self.setWindowTitle("GenFill Setup")
         self.setWindowIcon(app_icon())
-        self.setMinimumSize(720, 560)
-        self.resize(760, 600)
+        self.setMinimumSize(880, 600)
+        self.resize(940, 640)
         self.source = core.bundled_source()
         self.version = (core.read_build_info(self.source) or {}).get("version") \
             or core.read_version(self.source)
         self.installed = core.installed_version()
         self.nukes = core.find_nuke_installs()
+        self.nuke_running = core.nuke_is_running()
         self.worker = None
         self.installer = None
         self.mode = "install"
@@ -205,264 +253,309 @@ class SetupWindow(QtWidgets.QWidget):
 
     # -- layout -------------------------------------------------------------
     def _build(self):
-        root = QtWidgets.QVBoxLayout(self)
+        root = QtWidgets.QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        root.addWidget(self._build_sidebar())
 
-        header = QtWidgets.QFrame()
-        header.setObjectName("gsHeader")
-        hl = QtWidgets.QHBoxLayout(header)
-        hl.setContentsMargins(22, 16, 22, 16)
-        logo = QtWidgets.QLabel()
-        logo.setPixmap(logo_pixmap(40))
-        hl.addWidget(logo)
-        names = QtWidgets.QVBoxLayout()
-        names.setSpacing(0)
-        names.addWidget(_label("GenFill for Nuke", "gsAppName", wrap=False))
-        names.addWidget(_label("Setup &middot; version %s" % self.version, "gfMuted", wrap=False))
-        hl.addLayout(names)
-        hl.addStretch(1)
-        self.crumbs = []
-        for i, text in enumerate(self.CRUMBS):
-            if i:
-                hl.addWidget(_label(u"›", "gsCrumb", wrap=False))
-            lab = _label(text, "gsCrumb", wrap=False)
-            self.crumbs.append(lab)
-            hl.addWidget(lab)
-        root.addWidget(header)
-
-        self.pages = QtWidgets.QStackedWidget()
+        content = w.GlowBackground()
+        cl = QtWidgets.QVBoxLayout(content)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        self.pages = w.FadeStack()
         for build in (self._page_welcome, self._page_options, self._page_progress, self._page_done):
-            page = QtWidgets.QWidget()
-            lay = QtWidgets.QVBoxLayout(page)
-            lay.setContentsMargins(28, 24, 28, 18)
-            lay.setSpacing(12)
-            build(lay)
-            self.pages.addWidget(page)
-        root.addWidget(self.pages, 1)
+            self.pages.addWidget(build())
+        cl.addWidget(self.pages, 1)
 
-        footer = QtWidgets.QFrame()
-        footer.setObjectName("gsFooter")
+        footer = QtWidgets.QWidget()
         fl = QtWidgets.QHBoxLayout(footer)
-        fl.setContentsMargins(22, 12, 22, 12)
-        about = QtWidgets.QPushButton("About && credits")
-        about.setObjectName("gsLink")
-        about.clicked.connect(self._about)
-        fl.addWidget(about)
+        fl.setContentsMargins(40, 14, 40, 22)
+        fl.setSpacing(10)
+        self.footer_hint = label("", "gsFaint", wrap=False)
+        fl.addWidget(self.footer_hint)
         fl.addStretch(1)
-        self.back_btn = QtWidgets.QPushButton("Back")
+        self.back_btn = w.GhostButton("Back")
         self.back_btn.clicked.connect(lambda: self._go(self.pages.currentIndex() - 1))
         fl.addWidget(self.back_btn)
-        self.cancel_btn = QtWidgets.QPushButton("Cancel")
+        self.cancel_btn = w.GhostButton("Cancel")
         self.cancel_btn.clicked.connect(self._cancel)
         fl.addWidget(self.cancel_btn)
-        self.next_btn = QtWidgets.QPushButton("Next")
-        self.next_btn.setObjectName("gfGenerate")
+        self.next_btn = w.PrimaryButton("Continue")
         self.next_btn.clicked.connect(self._next)
         fl.addWidget(self.next_btn)
-        root.addWidget(footer)
+        cl.addWidget(footer)
+        root.addWidget(content, 1)
 
-    def _page_welcome(self, lay):
-        lay.addWidget(_label("Photoshop-style Generative Fill, inside Nuke.", "gsHeadline"))
-        lay.addWidget(_label(
-            "Draw a selection on a GenerativeFill node, type what you want (or nothing, to "
-            "remove), and pick from the variations. Use a cloud model with your own API key, or "
-            "run it free and offline on your NVIDIA GPU with Local AI.", "gfMuted"))
-
-        card, cl = _card()
-        cl.addWidget(_label("NUKE ON THIS COMPUTER", "gfSection"))
-        if self.nukes:
-            names = ", ".join(n.name for n in self.nukes)
-            cl.addWidget(_label("Found %s. GenFill loads in every version that uses your "
-                                "<b>.nuke</b> folder." % names))
-        else:
-            cl.addWidget(_label("No Nuke found in the usual places. That's fine if it lives "
-                                "somewhere else: GenFill still installs into your <b>.nuke</b> "
-                                "folder, which every Nuke version reads."))
-        cl.addSpacing(4)
-        cl.addWidget(_label("GENFILL", "gfSection"))
-        if self.installed:
-            cl.addWidget(_label("GenFill %s is installed in %s." % (self.installed,
-                                                                  core.default_target())))
-        else:
-            cl.addWidget(_label("Not installed yet."))
-        lay.addWidget(card)
-
-        self.rb_install = QtWidgets.QRadioButton(
-            "Update GenFill to %s" % self.version if self.installed else
-            "Install GenFill %s" % self.version)
-        self.rb_uninstall = QtWidgets.QRadioButton("Remove GenFill from Nuke")
-        self.rb_install.setChecked(True)
-        if self.installed:
-            lay.addWidget(self.rb_install)
-            lay.addWidget(self.rb_uninstall)
-        if core.nuke_is_running():
-            lay.addWidget(_label("Nuke is open. Close it before continuing, or restart it "
-                                 "afterwards to load the new GenFill.", "gfError"))
+    def _build_sidebar(self):
+        side = w.Sidebar()
+        side.setFixedWidth(232)
+        lay = QtWidgets.QVBoxLayout(side)
+        lay.setContentsMargins(22, 26, 22, 22)
+        lay.setSpacing(0)
+        head = QtWidgets.QHBoxLayout()
+        head.setSpacing(6)
+        head.addWidget(w.Logo(40))
+        names = QtWidgets.QVBoxLayout()
+        names.setSpacing(1)
+        names.addStretch(1)
+        names.addWidget(label("GenFill", "gsAppName", wrap=False))
+        names.addWidget(label("for Nuke &middot; %s" % self.version, "gsFaint", wrap=False))
+        names.addStretch(1)
+        head.addLayout(names)
+        head.addStretch(1)
+        lay.addLayout(head)
+        lay.addSpacing(40)
+        lay.addWidget(label("SETUP", "gsSection", wrap=False))
+        lay.addSpacing(12)
+        self.stepper = w.Stepper(self.STAGES)
+        lay.addWidget(self.stepper)
         lay.addStretch(1)
+        about = w.LinkButton("About && credits")
+        about.clicked.connect(self._about)
+        lay.addWidget(about, 0, Qt.AlignLeft)
+        lay.addSpacing(2)
+        lay.addWidget(label(link("https://github.com/iconnorthomas/GenFill",
+                                 "github.com/iconnorthomas/GenFill"), "gsFaint", wrap=False))
+        return side
 
-    def _page_options(self, lay):
-        self.options_title = _label("", "gsHeadline")
-        lay.addWidget(self.options_title)
+    def _page_welcome(self):
+        page = Page("WELCOME", "Generative Fill, right inside Nuke.",
+                    "Draw a selection on a GenerativeFill node, describe what you want (or leave "
+                    "it empty to remove), then pick from the variations. Use a cloud model with "
+                    "your own key, or run it free and offline on your NVIDIA GPU.")
+        b = page.body
+        self.rb_install = w.ChoiceCard(
+            "Update to %s" % self.version if self.installed else "Install GenFill %s" % self.version,
+            ("You have %s. Your settings, API keys and Local AI are kept." % self.installed)
+            if self.installed else "Adds GenFill to every Nuke version that uses your .nuke folder.",
+            "sparkle")
+        self.rb_uninstall = w.ChoiceCard("Remove GenFill",
+                                         "Take GenFill out of Nuke. You can keep your settings.",
+                                         "remove")
+        self.rb_install.setChecked(True)
+        b.addWidget(self.rb_install)
+        if self.installed:
+            b.addWidget(self.rb_uninstall)
+        else:
+            self.rb_uninstall.setVisible(False)
+
+        card = w.Card(spacing=8)
+        card.lay.addWidget(label("NUKE ON THIS COMPUTER", "gsSection", wrap=False))
+        chips = QtWidgets.QHBoxLayout()
+        chips.setSpacing(6)
+        if self.nukes:
+            for i, n in enumerate(self.nukes[:6]):
+                chips.addWidget(w.Chip(n.name, accent=(i == 0)))
+        else:
+            chips.addWidget(w.Chip("None found in the usual places"))
+        chips.addStretch(1)
+        card.lay.addLayout(chips)
+        card.lay.addWidget(label("GenFill installs into your <b>.nuke</b> folder, so it loads in "
+                                 "every version, including ones installed somewhere else.",
+                                 "gsMuted"))
+        b.addWidget(card)
+        if self.nuke_running:
+            b.addWidget(label("Nuke is open. Close it first, or restart it afterwards to load "
+                              "the new GenFill.", "gsWarn"))
+        b.addStretch(1)
+        return page
+
+    def _page_options(self):
+        page = self.options_page = Page("OPTIONS", "")
+        b = page.body
 
         # install options
         self.install_opts = QtWidgets.QWidget()
         il = QtWidgets.QVBoxLayout(self.install_opts)
         il.setContentsMargins(0, 0, 0, 0)
-        il.setSpacing(10)
-        card, cl = _card()
-        cl.addWidget(_label("PLUGIN FOLDER", "gfSection"))
+        il.setSpacing(14)
+        card = w.Card()
+        card.lay.addWidget(label("PLUGIN FOLDER", "gsSection", wrap=False))
         self.target_row = FolderRow(core.default_target())
-        cl.addWidget(self.target_row)
-        cl.addWidget(_label("Nuke loads GenFill from here through a marked block in your "
-                            "<b>.nuke/init.py</b>, which is backed up first.", "gfMuted"))
+        card.lay.addWidget(self.target_row)
+        card.lay.addWidget(label("Nuke loads GenFill from here through a marked block in "
+                                 "<b>.nuke/init.py</b>. Your init.py is backed up first.",
+                                 "gsFaint"))
         il.addWidget(card)
 
-        card, cl = _card()
-        cl.addWidget(_label("LOCAL AI (OPTIONAL)", "gfSection"))
-        self.ai_check = QtWidgets.QCheckBox(
-            "Also set up Local AI: FLUX.1 Fill and LaMa on your own GPU (about 25 GB)")
-        cl.addWidget(self.ai_check)
+        card = w.Card(spacing=12)
+        self.ai_check = w.Toggle(
+            "Set up Local AI",
+            "FLUX.1 Fill and LaMa on your own NVIDIA GPU: free, offline, no accounts. "
+            "About 25 GB; downloads resume if interrupted.")
+        card.lay.addWidget(self.ai_check)
         self.ai_box = QtWidgets.QWidget()
-        al = QtWidgets.QFormLayout(self.ai_box)
-        al.setContentsMargins(24, 2, 0, 0)
-        al.setLabelAlignment(Qt.AlignLeft)
-        self.gpu_label = _label("", "gfMuted")
-        al.addRow(_label("GPU", wrap=False), self.gpu_label)
-        self.quant_combo = QtWidgets.QComboBox()
-        self.quant_combo.setObjectName("gfModel")
-        al.addRow(_label("Model size", wrap=False), self.quant_combo)
+        form = QtWidgets.QGridLayout(self.ai_box)
+        form.setContentsMargins(52, 4, 0, 0)
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+        form.setColumnStretch(1, 1)
+        self.gpu_label = label("", "gsMuted")
+        self.quant_combo = w.Combo()
         self.ai_row = FolderRow("")
-        al.addRow(_label("Folder", wrap=False), self.ai_row)
-        self.license_check = QtWidgets.QCheckBox("I accept the FLUX.1 [dev] Non-Commercial License")
-        al.addRow("", self.license_check)
-        al.addRow("", _label('<a href="%s" style="color:#8fa6ff">Read the license</a>'
-                             % FLUX_LICENSE, wrap=False))
-        cl.addWidget(self.ai_box)
+        for r, (name, widget) in enumerate((("GPU", self.gpu_label), ("Model size", self.quant_combo),
+                                            ("Folder", self.ai_row))):
+            form.addWidget(label(name, "gsMuted", wrap=False), r, 0, Qt.AlignLeft | Qt.AlignVCenter)
+            form.addWidget(widget, r, 1)
+        self.license_check = w.Toggle("I accept the FLUX.1 [dev] Non-Commercial License")
+        form.addWidget(self.license_check, 3, 0, 1, 2)
+        form.addWidget(label(link(FLUX_LICENSE, "Read the license"), "gsFaint", wrap=False),
+                       4, 0, 1, 2)
+        card.lay.addWidget(self.ai_box)
         if WINDOWS:
             self._init_local_ai()
         else:
             self.ai_check.setEnabled(False)
             self.ai_box.setVisible(False)
-            cl.addWidget(_label("The automatic Local AI setup is Windows-only for now. Cloud "
-                                "models work on every platform.", "gfMuted"))
-        self.ai_check.toggled.connect(self.ai_box.setEnabled)
-        self.ai_check.toggled.connect(self._refresh_buttons)
+            card.lay.addWidget(label("Automatic Local AI setup is Windows-only for now. Cloud "
+                                     "models work on every platform.", "gsFaint"))
+        self.ai_check.toggled.connect(self._ai_toggled)
         self.license_check.toggled.connect(self._refresh_buttons)
-        self.ai_box.setEnabled(False)
+        self._ai_toggled(False)
         il.addWidget(card)
-        lay.addWidget(self.install_opts)
+        b.addWidget(self.install_opts)
 
         # uninstall options
         self.uninstall_opts = QtWidgets.QWidget()
         ul = QtWidgets.QVBoxLayout(self.uninstall_opts)
         ul.setContentsMargins(0, 0, 0, 0)
-        card, cl = _card()
-        cl.addWidget(_label("GenFill will be removed from %s and from your <b>init.py</b>. "
-                            "Images you generated stay in your shots' cache folders."
-                            % core.default_target()))
-        self.rm_ai_check = QtWidgets.QCheckBox("Also delete Local AI (models and private Python)")
-        self.rm_cfg_check = QtWidgets.QCheckBox("Also delete settings and API keys (%s)"
-                                                % core.config_dir())
+        ul.setSpacing(14)
+        card = w.Card(spacing=14)
+        card.lay.addWidget(label("GenFill will be removed from <b>%s</b> and from your "
+                                 "<b>init.py</b>. Images you generated stay in your shots' "
+                                 "cache folders." % core.default_target(), "gsMuted"))
+        card.lay.addWidget(divider())
         from genfill import localai
+        self.rm_ai_check = w.Toggle("Also delete Local AI",
+                                    "Models and the private Python in %s." % localai.root())
         self.rm_ai_check.setVisible(os.path.isdir(localai.root()))
-        cl.addWidget(self.rm_ai_check)
-        cl.addWidget(self.rm_cfg_check)
+        self.rm_cfg_check = w.Toggle("Also delete settings and API keys", core.config_dir())
+        card.lay.addWidget(self.rm_ai_check)
+        card.lay.addWidget(self.rm_cfg_check)
         ul.addWidget(card)
-        lay.addWidget(self.uninstall_opts)
-        lay.addStretch(1)
+        b.addWidget(self.uninstall_opts)
+        b.addStretch(1)
+        return page
 
     def _init_local_ai(self):
         from genfill import localai
         from genfill.localai import installer as inst
         self.ai_row.edit.setText(localai.root())
         name, vram = inst.detect_gpu()
-        self.gpu_label.setText("%s, %.0f GB" % (name, vram) if name else
+        self.gpu_label.setText("%s &middot; %.0f GB" % (name, vram) if name else
                                "No NVIDIA GPU detected. Local AI needs one.")
-        for qid, (label, _gb, _vram) in inst.QUANTS.items():
-            self.quant_combo.addItem(label, qid)
+        for qid, (text, _gb, _vram) in inst.QUANTS.items():
+            self.quant_combo.addItem(text, qid)
         self.quant_combo.setCurrentIndex(self.quant_combo.findData(inst.recommended_quant(vram)))
 
-    def _page_progress(self, lay):
-        self.progress_title = _label("", "gsHeadline")
-        lay.addWidget(self.progress_title)
-        card, cl = _card()
-        self.steps_layout = cl
+    def _ai_toggled(self, on):
+        self.ai_box.setEnabled(on)
+        self.ai_box.setVisible(on and WINDOWS)
+        self._refresh_buttons()
+
+    def _page_progress(self):
+        page = self.progress_page = Page("INSTALL", "")
+        b = page.body
+        card = w.Card(padding=(18, 12, 18, 12), spacing=2)
+        self.steps_layout = card.lay
         self.step_rows = []
-        lay.addWidget(card)
-        self.bar = QtWidgets.QProgressBar()
-        self.bar.setObjectName("gfProgress")
-        self.bar.setTextVisible(False)
-        self.bar.setFixedHeight(4)
-        self.bar.setRange(0, 1000)
-        lay.addWidget(self.bar)
-        self.status = _label("", "gfMuted")
-        lay.addWidget(self.status)
-        self.details_btn = QtWidgets.QToolButton()
-        self.details_btn.setObjectName("gfIcon")
-        self.details_btn.setText(u"▸ Details")
+        b.addWidget(card)
+        b.addSpacing(4)
+        self.bar = w.ShimmerBar()
+        b.addWidget(self.bar)
+        status_row = QtWidgets.QHBoxLayout()
+        self.status = label("", "gsMuted", wrap=False)
+        self.status.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        status_row.addWidget(self.status, 1)
+        self.details_btn = w.LinkButton("Show details")
         self.details_btn.setCheckable(True)
         self.details_btn.toggled.connect(self._toggle_details)
-        lay.addWidget(self.details_btn, 0, Qt.AlignLeft)
+        status_row.addWidget(self.details_btn)
+        b.addLayout(status_row)
         self.log_view = QtWidgets.QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(5000)
+        self.log_view.setMinimumHeight(170)
         self.log_view.setVisible(False)
-        lay.addWidget(self.log_view, 1)
-        lay.addStretch(1)
+        b.addWidget(self.log_view)
+        b.addStretch(1)
+        return page
 
-    def _page_done(self, lay):
-        row = QtWidgets.QHBoxLayout()
-        self.done_glyph = _label("", wrap=False)
-        row.addWidget(self.done_glyph, 0, Qt.AlignTop)
-        self.done_title = _label("", "gsHeadline")
-        row.addWidget(self.done_title, 1)
-        lay.addLayout(row)
-        self.done_text = _label("", "gfMuted")
-        lay.addWidget(self.done_text)
-        self.launch_card, cl = _card()
-        cl.addWidget(_label("START NUKE", "gfSection"))
-        launch_row = QtWidgets.QHBoxLayout()
-        for n in self.nukes[:4]:
-            btn = QtWidgets.QPushButton(n.name)
+    def _page_done(self):
+        page = self.done_page = Page("DONE", "")
+        page.title.setVisible(False)
+        b = page.body
+        head = QtWidgets.QHBoxLayout()
+        head.setSpacing(18)
+        self.mark = w.ResultMark()
+        head.addWidget(self.mark, 0, Qt.AlignTop)
+        texts = QtWidgets.QVBoxLayout()
+        texts.setSpacing(6)
+        self.done_title = label("", "gsTitle")
+        self.done_text = label("", "gsSubtitle")
+        texts.addWidget(self.done_title)
+        texts.addWidget(self.done_text)
+        head.addLayout(texts, 1)
+        b.addLayout(head)
+        b.addSpacing(6)
+
+        self.launch_card = w.Card(spacing=10)
+        self.launch_card.lay.addWidget(label("START NUKE", "gsSection", wrap=False))
+        grid = QtWidgets.QGridLayout()
+        grid.setSpacing(8)
+        for i, n in enumerate(self.nukes[:4]):
+            btn = QtWidgets.QPushButton(u"%s   →" % n.name)
+            btn.setObjectName("gsLaunch")
+            btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda _=False, n=n: self._launch(n))
-            launch_row.addWidget(btn)
-        launch_row.addStretch(1)
-        cl.addLayout(launch_row)
-        lay.addWidget(self.launch_card)
-        log_btn = QtWidgets.QPushButton("Open the setup log")
-        log_btn.setObjectName("gsLink")
+            grid.addWidget(btn, i // 2, i % 2)
+        self.launch_card.lay.addLayout(grid)
+        b.addWidget(self.launch_card)
+
+        self.tip_card = w.Card(spacing=6)
+        self.tip_card.lay.addWidget(label("NEXT", "gsSection", wrap=False))
+        self.tip_card.lay.addWidget(label(
+            "Find <b>GenFill</b> in the Nodes toolbar, or press Tab and type "
+            "<b>Generative Fill</b>. To confirm the build, use GenFill &rsaquo; Developer "
+            "&rsaquo; Run Smoke Test.", "gsMuted"))
+        b.addWidget(self.tip_card)
+        log_btn = w.LinkButton("Open the setup log")
         log_btn.clicked.connect(lambda: QtGui.QDesktopServices.openUrl(
             QtCore.QUrl.fromLocalFile(LOG_PATH)))
-        lay.addWidget(log_btn, 0, Qt.AlignLeft)
-        lay.addStretch(1)
+        b.addWidget(log_btn, 0, Qt.AlignLeft)
+        b.addStretch(1)
+        return page
 
     # -- navigation ---------------------------------------------------------
     def _go(self, index):
         index = max(0, min(index, self.pages.count() - 1))
-        self.pages.setCurrentIndex(index)
-        for i, lab in enumerate(self.crumbs):
-            lab.setProperty("current", "true" if i == index else "false")
-            lab.style().unpolish(lab)
-            lab.style().polish(lab)
         if index == 1:
             uninstall = self.mode == "uninstall"
-            self.options_title.setText("Remove GenFill" if uninstall else
-                                       ("Update options" if self.installed else "Install options"))
+            self.options_page.set_header(
+                "OPTIONS",
+                "Remove GenFill" if uninstall else ("Update options" if self.installed
+                                                    else "Install options"),
+                "Choose what else to clean up." if uninstall else
+                "Where GenFill goes, and whether to add the free Local AI.")
             self.install_opts.setVisible(not uninstall)
             self.uninstall_opts.setVisible(uninstall)
+        self.pages.setCurrentIndex(index)
+        self.stepper.set_current(index, failed=getattr(self, "_failed", False) and index == 3)
         self._refresh_buttons()
 
     def _refresh_buttons(self):
+        if not hasattr(self, "next_btn"):       # still building the pages
+            return
         index = self.pages.currentIndex()
         busy = self.worker is not None and self.worker.isRunning()
-        self.back_btn.setVisible(index in (1,))
-        self.cancel_btn.setVisible(index in (0, 1) or busy)
-        self.cancel_btn.setEnabled(not busy or self.installer is not None)
+        self.back_btn.setVisible(index == 1)
+        self.cancel_btn.setVisible(index in (0, 1) or (busy and self.installer is not None))
         self.next_btn.setVisible(index != 2)
+        hint = ""
         if index == 0:
-            self.next_btn.setText("Next")
+            self.next_btn.setText("Continue")
             self.next_btn.setEnabled(True)
+            hint = "Takes a few seconds. Nothing changes until you confirm."
         elif index == 1:
             if self.mode == "uninstall":
                 self.next_btn.setText("Remove")
@@ -471,9 +564,16 @@ class SetupWindow(QtWidgets.QWidget):
                 self.next_btn.setText("Update" if self.installed else "Install")
                 need_license = self.ai_check.isChecked() and not self.license_check.isChecked()
                 self.next_btn.setEnabled(not need_license)
+                if need_license:
+                    hint = "Accept the FLUX.1 [dev] license to set up Local AI."
+        elif index == 2:
+            hint = "You can keep working in Nuke while Local AI downloads." \
+                if self.installer is not None else ""
         elif index == 3:
             self.next_btn.setText("Close")
             self.next_btn.setEnabled(True)
+        self.footer_hint.setText(hint)
+        self.next_btn.updateGeometry()
 
     def _next(self):
         index = self.pages.currentIndex()
@@ -491,17 +591,13 @@ class SetupWindow(QtWidgets.QWidget):
             row.deleteLater()
         self.step_rows = []
         for text in labels:
-            row = _label("", wrap=False)
-            row.setProperty("text_", text)
+            row = w.TaskRow(text)
             self.steps_layout.addWidget(row)
             self.step_rows.append(row)
-            self._step(len(self.step_rows) - 1, "pending")
 
     def _step(self, i, state):
         if 0 <= i < len(self.step_rows):
-            row = self.step_rows[i]
-            row.setText(u"%s&nbsp;&nbsp;%s" % (STEP_GLYPHS[state], row.property("text_")))
-            row.setStyleSheet("color: %s; font-size: 12px;" % STEP_COLORS[state])
+            self.step_rows[i].set_state(state)
 
     def _start(self):
         try:
@@ -515,10 +611,12 @@ class SetupWindow(QtWidgets.QWidget):
         self._log_fh = open(LOG_PATH, "a", encoding="utf-8")
         self._log("==== GenFill Setup %s, %s, %s" % (self.version, self.mode,
                                                      time.strftime("%Y-%m-%d %H:%M")))
-        self.progress_title.setText(title)
+        self.progress_page.set_header("REMOVING" if self.mode == "uninstall" else "INSTALLING",
+                                      title, "")
         self._set_steps(labels)
-        self.bar.setValue(0)
-        self.status.setText("")
+        self.bar.set_value(None)
+        self.status.setText("Starting...")
+        self._failed = False
         self.worker = Worker(job, self)
         self.worker.event.connect(self._on_event)
         self._go(2)
@@ -533,19 +631,22 @@ class SetupWindow(QtWidgets.QWidget):
         if with_ai:
             from genfill.localai import installer as inst
             ai_root = self.ai_row.path()
-            labels += [label for _key, label in inst.Installer.STEPS]
+            labels += [text for _key, text in inst.Installer.STEPS]
             quant = self.quant_combo.currentData()
+        steps = float(len(labels))
 
         def job(emit):
             emit("step", index=0, state="running")
             core.install_plugin(target, self.source, log=lambda l: emit("log", line=l))
             emit("step", index=0, state="done")
+            emit("progress", fraction=1 / steps, text="Copied GenFill to %s" % target)
             emit("step", index=1, state="running")
             res = core.set_init_block(target)
             emit("log", line="updated %s (backup: %s)" % (res["init_py"], res["backup"]))
             for line in res["disabled"]:
                 emit("log", line="disabled an older GenFill line: %s" % line)
             emit("step", index=1, state="done")
+            emit("progress", fraction=2 / steps, text="Nuke will load GenFill from %s" % target)
             if not with_ai:
                 return True, "GenFill %s is installed." % self.version
             emit("progress", fraction=None, text="Setting up Local AI...")
@@ -605,21 +706,17 @@ class SetupWindow(QtWidgets.QWidget):
     def _on_event(self, kind, kw):
         if kind == "step":
             self._step(kw["index"], kw["state"])
-            if kw["state"] == "running":
-                self.status.setText(self.step_rows[kw["index"]].property("text_")
-                                    if kw["index"] < len(self.step_rows) else "")
+            if kw["state"] == "running" and kw["index"] < len(self.step_rows):
+                self.status.setText(self.step_rows[kw["index"]].text)
         elif kind == "progress":
-            frac = kw.get("fraction")
-            if frac is None:
-                self.bar.setRange(0, 0)
-            else:
-                self.bar.setRange(0, 1000)
-                self.bar.setValue(int(frac * 1000))
+            self.bar.set_value(kw.get("fraction"))
             self.status.setText(kw.get("text", ""))
         elif kind == "log":
             self._log(kw["line"])
         elif kind == "finished":
             self._finished(kw["ok"], kw["message"])
+        if kind in ("step", "finished"):
+            self._refresh_buttons()
 
     def _log(self, line):
         line = line.rstrip()
@@ -633,32 +730,29 @@ class SetupWindow(QtWidgets.QWidget):
         if self._log_fh:
             self._log_fh.close()
             self._log_fh = None
-        for i, row in enumerate(self.step_rows):
-            if not ok and row.text().startswith(RUNNING):
-                self._step(i, "failed")
-        self.bar.setRange(0, 1000)
-        self.bar.setValue(1000 if ok else self.bar.value())
+        for row in self.step_rows:
+            if row.state == "running":
+                row.set_state("done" if ok else "failed")
+        self.bar.set_value(1.0 if ok else self.bar.value)
         self.installer = None
-        color = "#7fd17f" if ok else style.ERROR
-        self.done_glyph.setText('<span style="color:%s; font-size:26px">%s</span>'
-                                % (color, DONE if ok else FAILED))
-        if ok and self.mode == "install":
+        self._failed = not ok
+        installed = ok and self.mode == "install"
+        if installed:
             self.done_title.setText("GenFill is ready")
-            self.done_text.setText(
-                message + " Start Nuke and find <b>GenFill</b> in the Nodes toolbar, or press "
-                "Tab and type &ldquo;Generative Fill&rdquo;. To check the build: GenFill &rsaquo; "
-                "Developer &rsaquo; Run Smoke Test.")
         elif ok:
             self.done_title.setText("GenFill was removed")
-            self.done_text.setText(message)
         else:
             self.done_title.setText("Setup didn't finish")
-            self.done_text.setText(message + " The details are in the setup log.")
-        self.launch_card.setVisible(ok and self.mode == "install" and bool(self.nukes))
+            message += " The details are in the setup log."
+        self.done_text.setText(message)
+        self.done_page.set_header("ALL DONE" if ok else "SOMETHING WENT WRONG")
+        self.launch_card.setVisible(installed and bool(self.nukes))
+        self.tip_card.setVisible(installed)
         self._go(3)
+        self.mark.play(ok)
 
     def _toggle_details(self, on):
-        self.details_btn.setText((u"▾" if on else u"▸") + " Details")
+        self.details_btn.setText("Hide details" if on else "Show details")
         self.log_view.setVisible(on)
 
     def _cancel(self):
@@ -696,16 +790,16 @@ class SetupWindow(QtWidgets.QWidget):
 
 class AboutDialog(QtWidgets.QDialog):
     CREDITS = [
-        ("FLUX.1 Fill [dev]", "Black Forest Labs", "FLUX.1 [dev] Non-Commercial License",
+        ("FLUX.1 Fill [dev]", "Black Forest Labs", "FLUX.1 [dev] Non-Commercial",
          "https://huggingface.co/black-forest-labs/FLUX.1-Fill-dev"),
-        ("FLUX.1 Fill GGUF", "YarvixPA", "FLUX.1 [dev] Non-Commercial License",
+        ("FLUX.1 Fill GGUF", "YarvixPA", "FLUX.1 [dev] Non-Commercial",
          "https://huggingface.co/YarvixPA/FLUX.1-Fill-dev-GGUF"),
         ("LaMa inpainting", "Samsung AI Center", "Apache 2.0", "https://github.com/advimman/lama"),
-        ("T5 v1.1 XXL encoder", "Google; bf16 by city96", "Apache 2.0",
+        ("T5 v1.1 XXL encoder", "Google, bf16 by city96", "Apache 2.0",
          "https://huggingface.co/city96/t5-v1_1-xxl-encoder-bf16"),
         ("CLIP ViT-L/14", "OpenAI", "MIT", "https://huggingface.co/openai/clip-vit-large-patch14"),
-        ("PyTorch, diffusers, transformers", "PyTorch Foundation; Hugging Face",
-         "BSD-3-Clause; Apache 2.0", "https://github.com/huggingface/diffusers"),
+        ("PyTorch, diffusers, transformers", "PyTorch Foundation, Hugging Face",
+         "BSD-3 / Apache 2.0", "https://github.com/huggingface/diffusers"),
         ("uv", "Astral", "Apache 2.0 / MIT", "https://github.com/astral-sh/uv"),
         ("Qt for Python (PySide6)", "The Qt Company", "LGPL v3",
          "https://code.qt.io/cgit/pyside/pyside-setup.git/"),
@@ -716,34 +810,48 @@ class AboutDialog(QtWidgets.QDialog):
         self.setObjectName("gsRoot")
         self.setStyleSheet(STYLESHEET)
         self.setWindowTitle("About GenFill Setup")
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(720)
         lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(24, 20, 24, 18)
-        lay.setSpacing(10)
+        lay.setContentsMargins(30, 26, 30, 22)
+        lay.setSpacing(14)
         head = QtWidgets.QHBoxLayout()
-        logo = QtWidgets.QLabel()
-        logo.setPixmap(logo_pixmap(48))
-        head.addWidget(logo)
-        head.addWidget(_label("<b>GenFill for Nuke</b> %s<br>by "
-                              '<a href="https://github.com/iconnorthomas" style="color:#8fa6ff">'
-                              "Connor Thomas</a>" % version), 1)
+        head.setSpacing(8)
+        head.addWidget(w.Logo(52))
+        names = QtWidgets.QVBoxLayout()
+        names.setSpacing(2)
+        names.addStretch(1)
+        names.addWidget(label("GenFill for Nuke", "gsAppName", wrap=False))
+        names.addWidget(label("Version %s &middot; by %s" % (
+            version, link("https://github.com/iconnorthomas", "Connor Thomas")), "gsMuted",
+            wrap=False))
+        names.addStretch(1)
+        head.addLayout(names, 1)
         lay.addLayout(head)
-        lay.addWidget(_label('Thanks to <a href="https://github.com/AlesUshakou" '
-                             'style="color:#8fa6ff">Ale&#353; Ushakou</a>, whose Windows setup '
-                             "app inspired this one.", "gfMuted"))
-        card, cl = _card()
-        cl.addWidget(_label("THIRD-PARTY MODELS AND LIBRARIES", "gfSection"))
-        for name, who, lic, url in self.CREDITS:
-            cl.addWidget(_label('<a href="%s" style="color:#dcdcdc">%s</a> &middot; %s '
-                                '&middot; <span style="color:#9a9a9a">%s</span>'
-                                % (url, name, who, lic)))
+        lay.addWidget(label("Thanks to %s, whose Windows setup app inspired this one."
+                            % link("https://github.com/AlesUshakou", "Ale&#353; Ushakou"),
+                            "gsMuted"))
+        card = w.Card(spacing=0)
+        card.lay.addWidget(label("THIRD-PARTY MODELS AND LIBRARIES", "gsSection", wrap=False))
+        card.lay.addSpacing(8)
+        grid = QtWidgets.QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(7)
+        for r, (name, who, lic, url) in enumerate(self.CREDITS):
+            grid.addWidget(label('<a href="%s" style="color:#ececf0; text-decoration:none">%s</a>'
+                                 % (url, name), wrap=False), r, 0)
+            grid.addWidget(label(who, "gsMuted", wrap=False), r, 1)
+            grid.addWidget(label(lic, "gsFaint", wrap=False), r, 2)
+        grid.setColumnStretch(1, 1)
+        card.lay.addLayout(grid)
         lay.addWidget(card)
-        lay.addWidget(_label('<a href="https://github.com/iconnorthomas/GenFill" '
-                             'style="color:#8fa6ff">github.com/iconnorthomas/GenFill</a>',
-                             wrap=False))
-        close = QtWidgets.QPushButton("Close")
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(label(link("https://github.com/iconnorthomas/GenFill",
+                                 "github.com/iconnorthomas/GenFill"), wrap=False))
+        row.addStretch(1)
+        close = w.PrimaryButton("Close")
         close.clicked.connect(self.accept)
-        lay.addWidget(close, 0, Qt.AlignRight)
+        row.addWidget(close)
+        lay.addLayout(row)
 
 
 def self_test(out_path):
@@ -766,6 +874,7 @@ def self_test(out_path):
         checks["local_ai_steps"] = len(inst.Installer.STEPS)
         checks["nuke_installs"] = [n.name for n in core.find_nuke_installs()]
         app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        apply_app_font(app)
         window = SetupWindow()
         checks["window"] = window.windowTitle()
         window.close()
@@ -787,6 +896,7 @@ def main(argv=None):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(argv)
     app.setApplicationName("GenFill Setup")
     app.setWindowIcon(app_icon())
+    apply_app_font(app)
     window = SetupWindow()
     window.show()
     return app.exec()
