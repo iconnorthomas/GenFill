@@ -91,6 +91,22 @@ class ReleaseTests(unittest.TestCase):
         self.assertTrue(any("no notes" in p for p in problems), problems)
 
 
+class BuildTests(unittest.TestCase):
+    def _result(self, version="0.9.0", commit="abc1234", dirty=False, ok=True):
+        return {"ok": ok, "checks": {"build_info": {"version": version, "commit": commit,
+                                                    "dirty": dirty}}}
+
+    def test_good_build(self):
+        self.assertEqual(release.check_build(self._result(), "0.9.0", "abc1234def5678"), [])
+
+    def test_wrong_version_commit_dirty_or_failed(self):
+        self.assertTrue(release.check_build(self._result(version="0.8.0"), "0.9.0"))
+        self.assertTrue(release.check_build(self._result(), "0.9.0", "fff0000"))
+        self.assertTrue(release.check_build(self._result(dirty=True), "0.9.0"))
+        problems = release.check_build({"ok": False, "error": "Traceback: boom"}, "0.9.0")
+        self.assertTrue(any("boom" in p for p in problems), problems)
+
+
 class BumpTests(unittest.TestCase):
     def test_bump(self):
         init, log = release.bump(INIT, CHANGELOG, "0.9.0", today="2026-10-23")

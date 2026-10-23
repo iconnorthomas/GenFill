@@ -12,6 +12,8 @@ ends:
   ``__version__`` in the tagged commit, that commit must be on ``main``, the
   version must be newer than every earlier ``v*`` tag, and the CHANGELOG must
   have its section. Writes that section as the release notes.
+* ``check-build``   (release workflow) A freshly built GenFill Setup's
+  ``--self-test`` passed and it carries exactly this version and commit.
 * ``bump X.Y.Z``    (you, on a release branch) Sets ``__version__`` and turns
   "## Unreleased" into "## X.Y.Z - <today>".
 
@@ -138,6 +140,22 @@ def check_release(tag, version, earlier_tags, changelog, on_main):
     return problems
 
 
+def check_build(result, version, commit=None):
+    """Problems with a GenFill Setup ``--self-test`` result (empty list = fine)."""
+    problems = []
+    if not result.get("ok"):
+        problems.append("the Setup self-test failed: %s"
+                        % (result.get("error") or result.get("checks")))
+    info = (result.get("checks") or {}).get("build_info") or {}
+    if info.get("version") != version:
+        problems.append("the Setup carries GenFill %r, not %s" % (info.get("version"), version))
+    if info.get("dirty"):
+        problems.append("the Setup was built from uncommitted changes")
+    if commit and info.get("commit") and not commit.startswith(info["commit"]):
+        problems.append("the Setup was built from commit %s, not %s" % (info["commit"], commit))
+    return problems
+
+
 def bump(init_text, changelog, version, today=None):
     """(new __init__ text, new CHANGELOG text) for releasing ``version``."""
     parse(version)
@@ -192,6 +210,11 @@ def main(argv=None):
     p.add_argument("--tag", required=True)
     p.add_argument("--main", default="origin/main", help="git ref of main")
     p.add_argument("--notes", help="write the release notes (CHANGELOG section) here")
+    p = sub.add_parser("check-build", help="release workflow: check a Setup --self-test result")
+    p.add_argument("result", help="the result.json written by GenFill-Setup --self-test")
+    p.add_argument("--version", required=True)
+    p.add_argument("--commit", help="the commit being released (full or short SHA)")
+    sub.add_parser("version", help="print __version__")
     p = sub.add_parser("bump", help="set __version__ and date the Unreleased CHANGELOG notes")
     p.add_argument("version")
     args = ap.parse_args(argv)
@@ -216,6 +239,18 @@ def main(argv=None):
                 with open(args.notes, "w", encoding="utf-8") as fh:
                     fh.write(changelog_section(changelog, version) + "\n")
             return _report(problems, "%s is ready to post" % args.tag)
+        if args.cmd == "version":
+            print(version_in(read(VERSION_FILE)))
+            return 0
+        if args.cmd == "check-build":
+            import json
+            try:
+                with open(args.result, encoding="utf-8") as fh:
+                    result = json.load(fh)
+            except (OSError, ValueError) as exc:
+                raise CheckError("couldn't read the self-test result %s: %s" % (args.result, exc))
+            problems = check_build(result, args.version.lstrip("vV"), args.commit)
+            return _report(problems, "GenFill Setup %s passed its self-test" % args.version)
         if args.cmd == "bump":
             init_text, changelog = bump(read(VERSION_FILE), read(CHANGELOG), args.version)
             write(VERSION_FILE, init_text)

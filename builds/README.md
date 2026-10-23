@@ -33,8 +33,13 @@ python builds/build.py
 
 The first run creates `builds/.venv-<os>` with the pinned tools in
 [`requirements.txt`](requirements.txt) (PySide6-Essentials, PyInstaller, Pillow). The new
-installer replaces the old one in this folder. Commit it as the last step before a release, so
-the binary matches the code next to it.
+installer replaces the old one in this folder.
+
+**Releases build their own.** Pushing a `vX.Y.Z` tag runs the *Release* workflow
+(`.github/workflows/release.yml`), which builds GenFill Setup on Windows, macOS and Linux from
+the tagged commit, self-tests each build, checks it carries that version and commit, and
+attaches it to the GitHub Release. Windows is required for the release to be posted. Get the
+latest installers from the repository's **Releases** page.
 
 Check a build without clicking through it:
 

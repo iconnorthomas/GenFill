@@ -1,24 +1,42 @@
-# Posts a GenFill release when a vX.Y.Z tag is pushed, after checking that the
-# number is right: the tag matches __version__ in that commit, the commit is on
-# main, it's newer than every earlier release, the CHANGELOG has its notes and
-# the tests pass. Anything wrong and nothing is posted (delete the tag, fix,
-# tag again). GenFill > Check for Updates reads these releases.
+# Posts a GenFill release when a vX.Y.Z tag is pushed. Every release ships a
+# GenFill Setup built here from that exact commit, so users always get the
+# latest build.
+#
+# 1. check:   the tag matches __version__ in that commit, the commit is on main,
+#             it's newer than every earlier release, the CHANGELOG has its notes,
+#             and the tests pass.
+# 2. build:   GenFill Setup for Windows (required), macOS and Linux (attached when
+#             they build), each self-tested and checked to carry this version and
+#             commit.
+# 3. publish: the GitHub Release with the CHANGELOG notes and the installers.
+#
+# Anything wrong and nothing is posted: delete the tag, fix, tag again.
+# GenFill > Check for Updates reads these releases.
+#
+# Pull requests that touch the installers or this workflow get a dry run: the
+# same builds and self-tests, without the tag checks and without posting.
 name: Release
 
 on:
   push:
     tags: ["v*.*.*"]
+  pull_request:
+    paths:
+      - "builds/**"
+      - "installers/**"
+      - "scripts/release.py"
+      - ".github/workflows/release.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Post release
+  check:
+    name: Check version
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -29,17 +47,108 @@ jobs:
         with:
           python-version: "3.11"
       - name: Check the version
-        run: python scripts/release.py check-release --tag "${GITHUB_REF_NAME}" --main origin/main --notes "${RUNNER_TEMP}/notes.md"
+        if: github.event_name == 'push'
+        run: python scripts/release.py check-release --tag "${GITHUB_REF_NAME}" --main origin/main --notes notes.md
       - name: Run unit tests
         run: python -m unittest discover -s tests
+      - name: Version to build
+        id: version
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = push ]; then v="${GITHUB_REF_NAME#v}"
+          else v=$(python scripts/release.py version); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Building GenFill $v"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: notes
+          path: notes.md
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  build:
+    name: Build Setup (${{ matrix.os }})
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    # Windows is required; a macOS or Linux build that fails doesn't stop the release.
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            runner: windows-latest
+            optional: false
+          - os: macos
+            runner: macos-latest
+            optional: true
+          - os: linux
+            runner: ubuntu-22.04      # older glibc, so the binary runs on more distros
+            optional: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0              # build.py stamps the commit into the plugin
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Qt libraries for the self-test
+        if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - name: Build GenFill Setup
+        run: python builds/build.py
+      - name: Self-test the build (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "builds/windows/GenFill-Setup-*-windows.exe" | Select-Object -First 1
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--self-test', "$PWD/result.json" -Wait -PassThru
+          Write-Host "self-test exit code $($p.ExitCode)"
+      - name: Self-test the build (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          zip=$(ls builds/macos/GenFill-Setup-*-macos-*.zip | head -1)
+          ditto -x -k "$zip" "$RUNNER_TEMP/app"
+          app=$(ls -d "$RUNNER_TEMP"/app/*.app | head -1)
+          "$app/Contents/MacOS/$(basename "$app" .app)" --self-test "$PWD/result.json" || true
+      - name: Self-test the build (Linux)
+        if: matrix.os == 'linux'
+        run: |
+          "$(ls builds/linux/GenFill-Setup-*-linux-* | head -1)" --self-test "$PWD/result.json" || true
+      - name: Check the build is this version and commit
+        run: python scripts/release.py check-build result.json --version "${{ needs.check.outputs.version }}" --commit "${GITHUB_SHA}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup-${{ matrix.os }}
+          path: builds/${{ matrix.os }}/GenFill-Setup-*
+          if-no-files-found: error
+
+  publish:
+    name: Post release
+    if: github.event_name == 'push'
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
       - name: Post the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          assets=()
-          for f in builds/*/GenFill-Setup-"${version}"-*; do
-            [ -f "$f" ] && assets+=("$f")
-          done
-          gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
-            --title "GenFill ${version}" --notes-file "${RUNNER_TEMP}/notes.md" --verify-tag
+          ls -la dist/*
+          if [ ! -f "dist/setup-windows/GenFill-Setup-${version}-windows.exe" ]; then
+            echo "ERROR: no GenFill-Setup-${version}-windows.exe was built; not posting." >&2
+            exit 1
+          fi
+          assets=$(find dist -path 'dist/setup-*' -type f -name "GenFill-Setup-${version}-*")
+          echo "Attaching:"; echo "$assets"
+          gh release create "${GITHUB_REF_NAME}" $assets \
+            --title "GenFill ${version}" --notes-file dist/notes/notes.md --verify-tag
