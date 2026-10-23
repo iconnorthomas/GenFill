@@ -21,7 +21,7 @@ no 8-bit sRGB export, no clipped highlights.
 - **Farm-safe.** The node is a Group of native Nuke nodes. Once you've picked a variation, the
   script renders anywhere, even where GenFill isn't installed.
 
-Current version: **0.8.0** (see [CHANGELOG.md](CHANGELOG.md)).
+Latest version: see [**Releases**](https://github.com/iconnorthomas/GenFill/releases/latest) (what changed: [CHANGELOG.md](CHANGELOG.md)).
 
 ---
 
@@ -58,10 +58,11 @@ Current version: **0.8.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ### 1. The plugin
 
-**Easiest: GenFill Setup.** Download the installer for your system from [`builds/`](builds/)
-(Windows `.exe`, macOS `.zip`, Linux binary) and run it. It installs or updates GenFill, can
-set up the Local AI on Windows in the same window, and can remove GenFill again. See
-[builds/README.md](builds/README.md).
+**Easiest: GenFill Setup.** Download the installer for your system from the
+[**latest release**](https://github.com/iconnorthomas/GenFill/releases/latest) (*Assets*: Windows `.exe`, macOS `.zip`, Linux binary) and run it.
+It installs or updates GenFill, can set up the Local AI on Windows in the same window, and can
+remove GenFill again. Every release's installers are built and tested from that release's code.
+See [builds/README.md](builds/README.md).
 
 **From a git checkout (Windows):** double-click **`installers\install.bat`**. It:
 
@@ -75,7 +76,7 @@ Run it again whenever you want the latest build. Restart Nuke afterwards. Detail
 Supported: Nuke 13 to 17 (Python 3, PySide2 or PySide6). GenFill Setup runs on Windows, macOS
 and Linux; the `install.bat` scripts are Windows-only.
 
-**Nuke Indie and Nuke Non-commercial** are supported from the build after 0.8.0. Those licenses
+**Nuke Indie and Nuke Non-commercial** are supported from GenFill 0.9.0. Those licenses
 let Python retrieve only 10 nodes per script, so GenFill detects them and avoids walking the
 script. It uses Nuke's TCL instead and retrieves at most one node, the one you have selected
 when you create the node. One thing differs from full Nuke: **GenFill > Developer > Run Smoke
@@ -491,7 +492,7 @@ rules allow it.
 | Fill looks washed out | You're probably on *Log (ACEScct)*; try *Display transform* |
 | Banding in bright fills | Use the local model (float); cloud models are 8-bit |
 | Bright highlights flatten inside the fill | Display transform ceiling; use *Log (ACEScct)* for that shot |
-| "10-node limit for Node objects accessible in Python", or a blank Group (Nuke Indie / Non-commercial) | Update GenFill to the build after 0.8.0 (see [Nuke Indie](#1-the-plugin)) |
+| "10-node limit for Node objects accessible in Python", or a blank Group (Nuke Indie / Non-commercial) | Update GenFill to 0.9.0 or later (see [Nuke Indie](#1-the-plugin)) |
 
 Send `test_output\genfill.log` and the helper log with any bug report.
 
