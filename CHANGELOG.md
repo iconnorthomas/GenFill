@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Version guard and release workflow** for maintainers (`scripts/release.py`, README
+  *Version numbers and releases*). Pull requests get a *Version check*: a branch that changes
+  `__version__` must raise it above `main` and every posted release, and move its CHANGELOG
+  notes. Pushing a `vX.Y.Z` tag on `main` checks the number again and posts the GitHub Release
+  with its CHANGELOG notes and installers.
+
+- **GenFill > Check for Updates...** (in both GenFill menus) tells you whether a newer GenFill is
+  on GitHub, and offers to open the download page. It uses the latest GitHub Release, or the
+  version on `main` while there are no releases. It only checks when you click it, and never
+  downloads or installs anything.
+
 - **The Local AI warms up before you click Generate.** Creating a GenerativeFill node set to the
   Local AI, opening its panel or switching its model to Local AI now starts the hidden helper and
   loads the model in the background (the panel says "Warming up the local AI..."), so the first

@@ -460,6 +460,10 @@ The network is used only by the **installer**, and only to download uv (GitHub),
 (PyPI and the official PyTorch index) and model files (Hugging Face, GitHub). Nothing about your
 images or prompts is sent.
 
+**GenFill > Check for Updates...** asks GitHub for the latest GenFill version, only when you click
+it. It sends nothing but a normal web request with GenFill's version in the User-Agent, and it
+never downloads or installs anything: it tells you what's available and can open the download page.
+
 **Cloud models (Stability AI, OpenAI) are different:** the crop around your selection (not the
 whole frame) and the prompt are uploaded to that company. Use them only when your client / TPN
 rules allow it.
@@ -533,6 +537,26 @@ python -m unittest discover -s tests -v
 `tests/fake_nuke.py` stands in for the `nuke` module, so the node build, upgrades and the full
 generate → select → delete flow are tested with the offline backend. Internals are documented in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Version numbers and releases
+
+A version number isn't a version until it's posted as a GitHub Release, and several branches can
+be open at once, so:
+
+- **Feature and fix branches never change `__version__`.** They add their notes under
+  `## Unreleased` in CHANGELOG.md.
+- **A release is its own branch and PR.** On a fresh branch from `main`, run
+  `python scripts/release.py bump X.Y.Z`. It sets `__version__` and moves the Unreleased notes
+  under `## X.Y.Z - <today>`. The PR's **Version check** fails if the number isn't higher than
+  `main` and every posted release (for example, another branch got there first), or if the
+  CHANGELOG wasn't updated.
+- **Posting:** after the release PR merges, tag the merge commit on `main` and push the tag:
+  `git tag vX.Y.Z` then `git push origin vX.Y.Z`. The *Release* workflow checks the tag again
+  (it must match `__version__` in that commit, be on `main`, be newer than every earlier
+  release, and have CHANGELOG notes), runs the tests, then posts the GitHub Release with those
+  notes and any `builds/*/GenFill-Setup-X.Y.Z-*` installers attached. If a check fails, nothing is
+  posted: delete the tag, fix it, and tag again.
+- **GenFill > Check for Updates** reads these releases, so artists only ever see posted versions.
 
 ---
 
