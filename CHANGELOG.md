@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **GenFill > Check for Updates...** (in both GenFill menus) tells you whether a newer GenFill is
+  on GitHub, and offers to open the download page. It uses the latest GitHub Release, or the
+  version on `main` while there are no releases. It only checks when you click it, and never
+  downloads or installs anything.
+
 - **Each variation shows up as soon as it's done.** With the Local AI, Stability AI and Offline
   Preview, the first variation appears in the panel (and the Viewer) while the others are still
   being generated, instead of after all of them. On the Local AI that's about a minute sooner per
