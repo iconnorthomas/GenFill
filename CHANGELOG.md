@@ -14,6 +14,11 @@
   folder, at most 64 prompts of a few MB each), so a prompt used before, even in an earlier
   Nuke session, isn't read again.
 
+- **GenFill Setup is downloaded from GitHub Releases.** The old 0.8.0 installer is no longer kept
+  in `builds/windows/` (it was built from the 0.8.0 commit and went stale as `main` moved on), and
+  locally built installers are git-ignored. The README and `builds/README.md` point to the latest
+  release, whose installers are always built from that release's code.
+
 ## 0.9.0 - 2026-10-22
 
 - **Every release ships a freshly built GenFill Setup.** The Release workflow builds Setup for

@@ -21,6 +21,10 @@ test_output/
 nuke/python/genfill/build_info.json
 setup_git.bat
 
-# GenFill Setup build tools and intermediates (the finished installers in builds/<os>/ are committed)
+# GenFill Setup build tools, intermediates and installers. Installers aren't committed: the
+# Release workflow builds them from each release's commit and attaches them to the GitHub Release.
 builds/.venv-*/
 builds/.work/
+builds/windows/
+builds/macos/
+builds/linux/
