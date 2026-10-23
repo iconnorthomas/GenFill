@@ -550,9 +550,12 @@ be open at once, so:
 - **Posting:** after the release PR merges, tag the merge commit on `main` and push the tag:
   `git tag vX.Y.Z` then `git push origin vX.Y.Z`. The *Release* workflow checks the tag again
   (it must match `__version__` in that commit, be on `main`, be newer than every earlier
-  release, and have CHANGELOG notes), runs the tests, then posts the GitHub Release with those
-  notes and any `builds/*/GenFill-Setup-X.Y.Z-*` installers attached. If a check fails, nothing is
-  posted: delete the tag, fix it, and tag again.
+  release, and have CHANGELOG notes) and runs the tests. It then **builds GenFill Setup from that
+  exact commit**: Windows is required, and macOS and Linux are attached when they build. It
+  self-tests each one and checks it carries this version and commit. Only then does it post the
+  GitHub Release with the CHANGELOG notes and the installers. Every release therefore ships a
+  Setup that matches its code. If any check or the Windows build fails, nothing is posted:
+  delete the tag, fix it, and tag again.
 - **GenFill > Check for Updates** reads these releases, so artists only ever see posted versions.
 
 ---

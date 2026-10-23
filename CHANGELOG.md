@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Every release ships a freshly built GenFill Setup.** The Release workflow builds Setup for
+  Windows (required), macOS and Linux from the tagged commit. It self-tests each build and checks
+  that it carries exactly that version and commit (`scripts/release.py check-build`) before
+  posting the GitHub Release with the installers attached.
+
 - **Version guard and release workflow** for maintainers (`scripts/release.py`, README
   *Version numbers and releases*). Pull requests get a *Version check*: a branch that changes
   `__version__` must raise it above `main` and every posted release, and move its CHANGELOG
