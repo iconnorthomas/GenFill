@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The Local AI warms up before you click Generate.** Creating a GenerativeFill node set to the
+  Local AI, opening its panel or switching its model to Local AI now starts the hidden helper and
+  loads the model in the background (the panel says "Warming up the local AI..."), so the first
+  Generate no longer waits the 30-60 s that start-up takes. Nuke stays responsive; a Generate
+  clicked during the warm-up waits for it and then runs on the loaded model, and Cancel works
+  while it waits. Nothing happens if Local AI isn't installed, is being installed or is already
+  loaded, or in `nuke -t`. Each warm-up is logged in genfill.log.
+- **Choose how long the Local AI stays loaded.** *Keep loaded* in the Local AI dialog: 10 or 30
+  minutes, 1 or 2 hours idle, or until Nuke closes. The default is now 30 minutes (was 10), since
+  loading it again costs 30-60 s. Stored as `local_ai.idle_minutes` in config.json. The dialog
+  also has a **Stop AI Helper** button to free the GPU right away (the menu entry is unchanged).
+
 - **Each variation shows up as soon as it's done.** With the Local AI, Stability AI and Offline
   Preview, the first variation appears in the panel (and the Viewer) while the others are still
   being generated, instead of after all of them. On the Local AI that's about a minute sooner per

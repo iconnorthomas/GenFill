@@ -65,7 +65,12 @@ class NukeController(object):
     def signature(self):
         n = self.node
         return (n["gf_state"].value(), n["gf_backend"].value(), n["gf_prompt"].value(),
-                tuple(sorted(self._engine.status(n).items())))
+                tuple(sorted(self._engine.status(n).items())), self.warming())
+
+    def warming(self):
+        """True while the Local AI loads in the background (see localai/warmup.py)."""
+        from ..localai import warmup
+        return warmup.is_warming()
 
     def prompt(self):
         return self.node["gf_prompt"].value()
@@ -522,7 +527,11 @@ class GenFillPanel(QtWidgets.QWidget):
             self.status.setText(st.get("error") or self._local_error)
         else:
             self.status.setObjectName("gfMuted")
-            self.status.setText(st.get("message", "") if (running or st.get("message")) else "")
+            text = st.get("message", "") if (running or st.get("message")) else ""
+            warming = getattr(self.ctl, "warming", None)
+            if not text and label.startswith("Local") and warming and warming():
+                text = "Warming up the local AI..."
+            self.status.setText(text)
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)
         self.status.setVisible(bool(self.status.text()))

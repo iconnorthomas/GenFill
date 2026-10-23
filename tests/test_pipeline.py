@@ -143,6 +143,46 @@ class PipelineTests(unittest.TestCase):
         finally:
             del n.thisNode, n.thisKnob
 
+    def test_local_ai_warms_up_on_create_and_panel_open(self):
+        n = gfnode.nuke
+        from genfill.localai import warmup
+        with mock.patch.object(n, "GUI", True), \
+                mock.patch.object(warmup, "start", return_value=True) as start:
+            g = gfnode.create()                                    # Local AI is the default
+            start.assert_called_once_with("new GenerativeFill node")
+            before = fake_nuke.RETRIEVED[0]
+            gfnode.warm_up_local_ai(g, "test")
+            self.assertEqual(fake_nuke.RETRIEVED[0], before)       # no node retrievals (Indie)
+            n.thisNode = lambda: g
+            try:
+                for knob, reason in (("showPanel", "panel opened"),
+                                     ("gf_backend", "model set to Local AI")):
+                    start.reset_mock()
+                    n.thisKnob = lambda: g[knob]
+                    gfnode.knob_changed()
+                    start.assert_called_once_with(reason)
+                # Other models never start the helper.
+                start.reset_mock()
+                g["gf_backend"].setValue(self.g["gf_backend"].value())     # Offline Preview
+                for knob in ("showPanel", "gf_backend"):
+                    n.thisKnob = lambda: g[knob]
+                    gfnode.knob_changed()
+                start.assert_not_called()
+            finally:
+                del n.thisNode, n.thisKnob
+        # Without a GUI (nuke -t, render farm) there's no warm-up.
+        with mock.patch.object(warmup, "start") as start:
+            gfnode.create()
+            start.assert_not_called()
+
+    def test_warm_up_never_raises_into_nuke(self):
+        from genfill.localai import warmup
+        with mock.patch.object(gfnode.nuke, "GUI", True), \
+                mock.patch.object(warmup, "start", side_effect=RuntimeError("boom")):
+            g = gfnode.create()
+            self.assertIsNotNone(g)
+            self.assertFalse(gfnode.warm_up_local_ai(g, "test"))
+
     def test_pre_07_selection_is_upgraded(self):
         g = self.g
         sw = g.node(gfnode.SEL_SWITCH)

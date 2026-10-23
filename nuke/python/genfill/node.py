@@ -249,6 +249,23 @@ def _safe_call(fn, *args):
         print("GenFill: %s failed: %s" % (fn.__name__, exc))
 
 
+def warm_up_local_ai(group, reason):
+    """Start loading the Local AI in the background when this node will use it.
+
+    Only reads this node's own knobs (no node retrievals, so it is safe on Nuke
+    Indie) and never raises: it runs from knobChanged and node creation."""
+    try:
+        if not nuke.GUI or "gf_backend" not in group.knobs():
+            return False
+        if backend_for(group).id != "local":
+            return False
+        from .localai import warmup
+        return warmup.start(reason)
+    except Exception as exc:
+        print("GenFill: Local AI warm-up skipped: %s" % exc)
+        return False
+
+
 def _sync_roto_tools(group):
     if "gf_selection" not in group.knobs():
         return
@@ -784,6 +801,7 @@ def create():
     group.setSelected(True)
     if nuke.GUI:
         nuke.show(group)
+    warm_up_local_ai(group, "new GenerativeFill node")
     return group
 
 
@@ -810,7 +828,10 @@ def knob_changed():
             print("GenFill: could not refresh result: %s" % exc)
         if name == "showPanel":
             _sync_roto_tools(node)
+            warm_up_local_ai(node, "panel opened")
     elif name == "hidePanel":
         _safe_call(detach_roto_tools, node)
     elif name == "gf_selection":
         _sync_roto_tools(node)
+    elif name == "gf_backend":
+        warm_up_local_ai(node, "model set to Local AI")

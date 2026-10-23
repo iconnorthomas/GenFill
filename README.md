@@ -229,8 +229,11 @@ Nuke (GenFill plugin)                          %USERPROFILE%\GenFill-LocalAI\
 - PyTorch and ~10 GB of weights never load into Nuke. A crash or out-of-memory error becomes an
   error in the panel; Nuke and your script stay alive, and PyTorch's CUDA libraries can't clash
   with Nuke's (CopyCat, Cattery).
-- The helper starts on the first local generation and keeps the model loaded between
-  generations. It exits when Nuke closes, after 10 idle minutes, or on **Local AI > Stop AI Helper**.
+- The helper starts loading in the background as soon as a GenerativeFill node set to the Local AI
+  is created or its panel is opened, so the first Generate doesn't wait 30-60 s for it, and it
+  keeps the model loaded between generations. It exits when Nuke closes, on **Local AI > Stop AI
+  Helper**, or after it has been idle for the time set under **Keep loaded** in the Local AI
+  dialog (30 minutes by default; "Until Nuke closes" is an option).
 - To fit 12 GB, the FLUX model stays on the GPU and the big text encoder (T5 for FLUX.1, Qwen3
   for klein, 8-9.5 GB) is loaded only while a new prompt is encoded (prompt encodings are cached).
   klein works at up to 1 megapixel; larger regions are scaled to fit and back. The first generation after the helper starts
