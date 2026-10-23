@@ -1,14 +1,18 @@
 # Builds
 
-Ready-to-run **GenFill Setup** installers, one per platform. Each one carries the GenFill
+**GenFill Setup** is a ready-to-run installer, one per platform. Each one carries the GenFill
 plugin inside it, so it installs exactly the build it was made from, with no git, Python or
 internet needed (except for the optional Local AI download).
 
-| Folder | File | Built on |
+**Download it from the [latest release](https://github.com/iconnorthomas/GenFill/releases/latest)** (under *Assets*). The installers aren't kept in
+this folder: every release builds them from its own commit, so a release's installers always
+match its code. This folder holds the build script.
+
+| Platform | File | Runs on |
 |---|---|---|
-| `windows/` | `GenFill-Setup-<version>-windows.exe` | Windows 10/11 x64 |
-| `macos/` | `GenFill-Setup-<version>-macos-<arch>.zip` (contains the `.app`) | macOS, Apple Silicon (`arm64`) or Intel (`x86_64`) |
-| `linux/` | `GenFill-Setup-<version>-linux-x86_64` | Linux x86_64 (glibc of the build machine or newer) |
+| Windows | `GenFill-Setup-<version>-windows.exe` | Windows 10/11 x64 |
+| macOS | `GenFill-Setup-<version>-macos-<arch>.zip` (contains the `.app`) | macOS, Apple Silicon (`arm64`) or Intel (`x86_64`) |
+| Linux | `GenFill-Setup-<version>-linux-x86_64` | Linux x86_64 (glibc of the build machine or newer) |
 
 ## What Setup does
 
@@ -33,7 +37,7 @@ python builds/build.py
 
 The first run creates `builds/.venv-<os>` with the pinned tools in
 [`requirements.txt`](requirements.txt) (PySide6-Essentials, PyInstaller, Pillow). The new
-installer replaces the old one in this folder.
+installer goes in `builds/windows/`, `builds/macos/` or `builds/linux/` (git ignores them).
 
 **Releases build their own.** Pushing a `vX.Y.Z` tag runs the *Release* workflow
 (`.github/workflows/release.yml`), which builds GenFill Setup on Windows, macOS and Linux from
@@ -44,7 +48,7 @@ latest installers from the repository's **Releases** page.
 Check a build without clicking through it:
 
 ```bash
-builds/windows/GenFill-Setup-0.8.0-windows.exe --self-test result.json
+builds/windows/GenFill-Setup-<version>-windows.exe --self-test result.json
 ```
 
 `result.json` reports whether the bundled plugin, HTTPS, the Local AI installer and the window
