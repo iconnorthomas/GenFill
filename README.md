@@ -75,6 +75,18 @@ Run it again whenever you want the latest build. Restart Nuke afterwards. Detail
 Supported: Nuke 13 to 17 (Python 3, PySide2 or PySide6). GenFill Setup runs on Windows, macOS
 and Linux; the `install.bat` scripts are Windows-only.
 
+**Nuke Indie and Nuke Non-commercial** are supported from the build after 0.8.0. Those licenses
+let Python retrieve only 10 nodes per script, so GenFill detects them and avoids walking the
+script. It uses Nuke's TCL instead and retrieves at most one node, the one you have selected
+when you create the node. Two things differ from full Nuke:
+
+- The copy/paste check (which gives a pasted GenerativeFill its own cache folder) only sees
+  nodes at the top level of the script, not copies inside other Groups.
+- **GenFill > Developer > Run Smoke Test** may still hit the limit.
+
+To try the Indie code paths on a full license, set the environment variable
+`GENFILL_LIMITED_PYTHON=1` and restart Nuke.
+
 ### 2. The free local AI (optional, recommended)
 
 Turn on **Set up Local AI** in GenFill Setup, or in Nuke use **GenFill > Local AI > Install /
@@ -475,6 +487,7 @@ rules allow it.
 | Fill looks washed out | You're probably on *Log (ACEScct)*; try *Display transform* |
 | Banding in bright fills | Use the local model (float); cloud models are 8-bit |
 | Bright highlights flatten inside the fill | Display transform ceiling; use *Log (ACEScct)* for that shot |
+| "10-node limit for Node objects accessible in Python", or a blank Group (Nuke Indie / Non-commercial) | Update GenFill to the build after 0.8.0 (see [Nuke Indie](#1-the-plugin)) |
 
 Send `test_output\genfill.log` and the helper log with any bug report.
 
