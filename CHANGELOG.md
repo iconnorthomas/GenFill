@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-10-22
+
 - **Every release ships a freshly built GenFill Setup.** The Release workflow builds Setup for
   Windows (required), macOS and Linux from the tagged commit. It self-tests each build and checks
   that it carries exactly that version and commit (`scripts/release.py check-build`) before
