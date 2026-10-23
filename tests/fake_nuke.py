@@ -154,6 +154,7 @@ class Node(object):
             self._knobs["curves"] = CurvesKnob("curves")
         for k, v in kw.items():
             self[k].setValue(v)
+        self._parent = _context[-1] if _context else None
         (_context[-1]._children if _context else _root_nodes).append(self)
 
     # knobs
@@ -207,7 +208,10 @@ class Node(object):
         return _retrieve(list(self._children))
 
     def fullName(self):
-        return self._name
+        parent = getattr(self, "_parent", None)
+        if parent is None or parent is _root:
+            return self._name
+        return parent.fullName() + "." + self._name
 
     def node(self, name):
         for c in self._children:
@@ -288,11 +292,12 @@ def tcl(script):
     """Only the TCL GenFill sends; anything else raises like an unknown command."""
     if script == "selected_nodes":
         return " ".join(n._name for n in SELECTED)
-    if "gf_uid" in script and "foreach" in script:
+    if "gf_uid_scan" in script and "in root" in script:
+        # Like Nuke: recurses into Groups, full names start with "root.".
         words = []
-        for n in _root_nodes:
+        for n in list(_root_nodes) + [c for top in _root_nodes for c in _all(top)]:
             if "gf_uid" in n._knobs:
-                words += [n._name, n["gf_uid"].value() or "{}"]
+                words += ["root." + n.fullName(), n["gf_uid"].value() or "{}"]
         return " ".join(words)
     raise RuntimeError("fake tcl: unknown command %r" % script)
 

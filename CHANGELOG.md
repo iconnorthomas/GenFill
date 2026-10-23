@@ -13,6 +13,9 @@
   every selected node one by one and listed all ~35 nodes inside the GenerativeFill node, which
   goes over the 10-node limit. On those licenses it now deselects in one call and skips the knob
   inventory; the report records `"limited_python": true`.
+- On Nuke Indie / Non-commercial the copy/paste check now also finds GenerativeFill nodes
+  inside other Groups (it used to see only the top level of the script), still without using
+  any of the 10 node retrievals.
 - Tests run on GitHub Actions for every pull request (Windows with Python 3.9 to 3.11, Ubuntu with 3.11).
 
 ## 0.8.0 - 2026-10-17

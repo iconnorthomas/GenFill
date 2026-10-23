@@ -56,9 +56,20 @@ def _uid(node):
 
 
 # TCL, so Nuke Indie doesn't count a node retrieval per node in the script.
-# Top level only: copies inside other Groups aren't seen there.
-_UIDS_TCL = ("in root {set _gf {}; foreach _n [nodes] {if {[exists $_n.gf_uid]} "
-             "{lappend _gf $_n [value $_n.gf_uid]}}; set _gf}")
+# Walks into every Group, so copies pasted inside other Groups are seen too.
+_UIDS_TCL = (
+    "proc gf_uid_scan {} {"
+    " set r {};"
+    " foreach n [nodes] {"
+    "  if {[exists $n.gf_uid]} {lappend r [full_name $n] [value $n.gf_uid]};"
+    "  if {[class $n] == \"Group\"} {set r [concat $r [in $n {gf_uid_scan}]]}"
+    " };"
+    " return $r"
+    "}; in root {gf_uid_scan}")
+
+
+def _strip_root(name):
+    return name[len("root."):] if name.startswith("root.") else name
 
 
 def _genfill_uids():
@@ -69,7 +80,7 @@ def _genfill_uids():
         except Exception:
             gflog.exception("could not list GenFill nodes via TCL; skipping the copy check")
             return []
-        return list(zip(words[0::2], words[1::2]))
+        return [(_strip_root(n), u) for n, u in zip(words[0::2], words[1::2])]
     try:
         nodes = nuke.allNodes("Group", recurseGroups=True)
     except TypeError:
@@ -82,7 +93,7 @@ def ensure_unique_uid(node):
     status). Its earlier generations still resolve through their ``abs_dir``.
     Returns True if the uid was changed."""
     uid = _uid(node)
-    name = node.fullName()
+    name = _strip_root(node.fullName())
     for other_name, other_uid in _genfill_uids():
         if other_name != name and other_uid == uid:
             new = uuid.uuid4().hex[:12]
