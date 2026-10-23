@@ -368,6 +368,24 @@ class IndieTests(unittest.TestCase):
         self.assertNotEqual(copy["gf_uid"].value(), g["gf_uid"].value())
         fake_nuke.delete(copy)
 
+    def test_copy_inside_another_group_gets_its_own_uid(self):
+        g = self._create()
+        comp = nuke.nodes.Group(name="IndieComp")
+        with comp:
+            inner = gfnode.create()
+        try:
+            self.assertEqual(inner.fullName(), "IndieComp." + inner.name())
+            inner["gf_uid"].setValue(g["gf_uid"].value())
+            fake_nuke.RETRIEVED[0] = 0
+            self.assertTrue(engine.ensure_unique_uid(inner))
+            self.assertNotEqual(inner["gf_uid"].value(), g["gf_uid"].value())
+            self.assertFalse(engine.ensure_unique_uid(inner))   # unique now: no change
+            self.assertFalse(engine.ensure_unique_uid(g))       # the original keeps its uid
+            self.assertEqual(fake_nuke.RETRIEVED[0], 0)
+        finally:
+            fake_nuke.delete(comp)
+            fake_nuke.delete(g)
+
     def test_env_var_forces_limited_mode(self):
         fake_nuke.env["indie"] = False
         self.assertFalse(gfnode.limited_python())

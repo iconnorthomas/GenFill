@@ -78,11 +78,8 @@ and Linux; the `install.bat` scripts are Windows-only.
 **Nuke Indie and Nuke Non-commercial** are supported from the build after 0.8.0. Those licenses
 let Python retrieve only 10 nodes per script, so GenFill detects them and avoids walking the
 script. It uses Nuke's TCL instead and retrieves at most one node, the one you have selected
-when you create the node. Two things differ from full Nuke:
-
-- The copy/paste check (which gives a pasted GenerativeFill its own cache folder) only sees
-  nodes at the top level of the script, not copies inside other Groups.
-- **GenFill > Developer > Run Smoke Test** skips its knob inventory of the node's internals.
+when you create the node. One thing differs from full Nuke: **GenFill > Developer > Run Smoke
+Test** skips its knob inventory of the node's internals.
 
 To try the Indie code paths on a full license, set the environment variable
 `GENFILL_LIMITED_PYTHON=1` and restart Nuke.
