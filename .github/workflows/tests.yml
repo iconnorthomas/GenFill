@@ -34,3 +34,20 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+  # A branch that changes __version__ must raise it above main and every posted
+  # release (several branches can be open at once). See scripts/release.py.
+  version:
+    name: Version check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # main and the release tags
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the version number
+        run: python scripts/release.py check-pr --base "origin/${{ github.base_ref }}"
