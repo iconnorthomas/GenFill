@@ -1,0 +1,45 @@
+# Posts a GenFill release when a vX.Y.Z tag is pushed, after checking that the
+# number is right: the tag matches __version__ in that commit, the commit is on
+# main, it's newer than every earlier release, the CHANGELOG has its notes and
+# the tests pass. Anything wrong and nothing is posted (delete the tag, fix,
+# tag again). GenFill > Check for Updates reads these releases.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Post release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check the version
+        run: python scripts/release.py check-release --tag "${GITHUB_REF_NAME}" --main origin/main --notes "${RUNNER_TEMP}/notes.md"
+      - name: Run unit tests
+        run: python -m unittest discover -s tests
+      - name: Post the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          assets=()
+          for f in builds/*/GenFill-Setup-"${version}"-*; do
+            [ -f "$f" ] && assets+=("$f")
+          done
+          gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
+            --title "GenFill ${version}" --notes-file "${RUNNER_TEMP}/notes.md" --verify-tag
