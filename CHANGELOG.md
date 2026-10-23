@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Local AI: "Reading the prompt..." takes about 2 seconds instead of 1 to 3 minutes.** The
+  text encoder (T5 for FLUX.1 Fill, Qwen3 for FLUX.2 [klein]) is too big to share a 12 GB GPU
+  with the image model, so for every new prompt the image model was moved off the GPU, the
+  encoder read from disk, and the image model moved back. That took 70 s on an RTX 3080 Ti with
+  the models on a hard disk, and up to 2 m 40 s when Windows was short of memory. Now the image
+  model stays on the GPU and the text encoder runs from RAM, one layer at a time on the GPU
+  (same results). It's read into RAM in the background right after the model loads, and stays
+  there for the next prompts, only while RAM has room for it plus 4 GB to spare; otherwise it's
+  read when needed, as before. Prompts are also cached on disk (the Local AI's `cache/embeds`
+  folder, at most 64 prompts of a few MB each), so a prompt used before, even in an earlier
+  Nuke session, isn't read again.
+
 - **GenFill Setup is downloaded from GitHub Releases.** The old 0.8.0 installer is no longer kept
   in `builds/windows/` (it was built from the 0.8.0 commit and went stale as `main` moved on), and
   locally built installers are git-ignored. The README and `builds/README.md` point to the latest

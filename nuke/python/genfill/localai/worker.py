@@ -48,10 +48,25 @@ def log(msg, *args):
     sys.stderr.flush()
 
 
+def memory_free():
+    """(RAM free, commit free) in bytes on Windows, else None."""
+    st = _memory_struct()
+    return (st.ullAvailPhys, st.ullAvailPageFile) if st else None
+
+
 def memory_status():
     """'RAM free x GB, commit free y GB' on Windows (commit = RAM + page file)."""
-    if not sys.platform.startswith("win"):
+    st = _memory_struct()
+    if not st:
         return ""
+    return "RAM free %.1f/%.1f GB, commit free %.1f/%.1f GB" % (
+        st.ullAvailPhys / 1e9, st.ullTotalPhys / 1e9, st.ullAvailPageFile / 1e9,
+        st.ullTotalPageFile / 1e9)
+
+
+def _memory_struct():
+    if not sys.platform.startswith("win"):
+        return None
     try:
         import ctypes
 
@@ -65,12 +80,11 @@ def memory_status():
                         ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
         st = MEMORYSTATUSEX()
         st.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st))
-        return "RAM free %.1f/%.1f GB, commit free %.1f/%.1f GB" % (
-            st.ullAvailPhys / 1e9, st.ullTotalPhys / 1e9, st.ullAvailPageFile / 1e9,
-            st.ullTotalPageFile / 1e9)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return None
+        return st
     except Exception:
-        return ""
+        return None
 
 
 WINDOWS_MEMORY_MSG = (
@@ -135,6 +149,112 @@ def resize_float(arr, width, height):
     return t[0].permute(1, 2, 0).numpy()
 
 
+def stream_blocks(model, blocks, device):
+    """Run ``model`` on ``device`` while most of its weights stay in RAM.
+
+    Everything outside ``blocks`` (embeddings, final norm) moves to the device for
+    good; each block's weights are copied over just before that block runs and
+    dropped right after. So a 9.5 GB text encoder needs well under 1 GB of VRAM
+    and the FLUX transformer can stay on the GPU.
+    """
+    in_blocks = set()
+    for block in blocks:
+        in_blocks.update(id(t) for t in block.parameters())
+        in_blocks.update(id(t) for t in block.buffers())
+    for t in list(model.parameters()) + list(model.buffers()):
+        if id(t) not in in_blocks:
+            t.data = t.data.to(device)
+
+    def hooks(tensors):
+        home = [t.data for t in tensors]
+
+        def onload(_module, _args):
+            for t, h in zip(tensors, home):
+                t.data = h.to(device, non_blocking=True)
+
+        def offload(_module, _args, _out):
+            for t, h in zip(tensors, home):
+                t.data = h
+        return onload, offload
+
+    for block in blocks:
+        onload, offload = hooks(list(block.parameters()) + list(block.buffers()))
+        block.register_forward_pre_hook(onload)
+        block.register_forward_hook(offload)
+    return model
+
+
+class EmbedCache(object):
+    """Prompt embeddings saved on disk, so a prompt that was read once (even before
+    the helper or Nuke restarted) never needs the big text encoder again.
+
+    One file per prompt (a few MB), named by a hash of ``model_key`` and the prompt;
+    ``model_key`` changes when the model is reinstalled. The least recently used
+    files beyond ``max_files`` are deleted. ``save(obj, path)`` / ``load(path)``
+    default to torch.save / torch.load. Never raises: a broken cache is just a miss.
+    """
+
+    def __init__(self, folder, model_key, max_files=64, save=None, load=None):
+        self.folder = folder
+        self.model_key = model_key
+        self.max_files = max_files
+        self._save = save or _torch_save
+        self._load = load or _torch_load
+
+    def path(self, prompt):
+        import hashlib
+        digest = hashlib.sha256((self.model_key + "\0" + prompt).encode("utf-8")).hexdigest()
+        return os.path.join(self.folder, digest[:32] + ".pt")
+
+    def get(self, prompt):
+        path = self.path(prompt)
+        if not os.path.isfile(path):
+            return None
+        try:
+            value = self._load(path)
+            os.utime(path, None)           # most recently used
+            return value
+        except Exception as exc:
+            log("embedding cache: unreadable %s (%s), ignoring", os.path.basename(path), exc)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return None
+
+    def put(self, prompt, value):
+        path = self.path(prompt)
+        try:
+            os.makedirs(self.folder, exist_ok=True)
+            self._save(value, path + ".part")
+            os.replace(path + ".part", path)
+            self._prune()
+        except Exception as exc:
+            log("embedding cache: couldn't save (%s)", exc)
+
+    def _prune(self):
+        files = [os.path.join(self.folder, f) for f in os.listdir(self.folder)
+                 if f.endswith(".pt")]
+        if len(files) <= self.max_files:
+            return
+        files.sort(key=os.path.getmtime)
+        for f in files[:len(files) - self.max_files]:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
+def _torch_save(value, path):
+    import torch
+    torch.save(tuple(t.detach().to("cpu") for t in value), path)
+
+
+def _torch_load(path):
+    import torch
+    return tuple(torch.load(path, map_location="cpu", weights_only=True))
+
+
 class Cancelled(Exception):
     pass
 
@@ -171,6 +291,25 @@ def klein_size(width, height):
     h = max(16, int(height * scale) // 16 * 16)
     return w, h
 
+
+# Keep the text encoder in RAM between prompts only while RAM and commit both
+# have at least this much free afterwards. Reading T5 again from a hard disk
+# takes ~40-65 s; running it from RAM ~2 s. Below this, Nuke needs the room more.
+KEEP_TEXT_ENCODER_FREE = 4e9
+EMBED_FORMAT = 1     # bump if the cached embeddings' meaning changes
+
+
+def embed_key(manifest):
+    """Identifies the text encoder(s) the disk cache's embeddings came from."""
+    family = manifest.get("family") or FLUX1
+    parts = [str(EMBED_FORMAT), family, str(manifest.get("installed", ""))]
+    if family == KLEIN:
+        parts.append(str(manifest.get("model_dir", "")))
+    else:
+        parts += [str(manifest.get("t5_dir", "")), str(manifest.get("clip_dir", ""))]
+    return "|".join(parts)
+
+
 class Engine(object):
     def __init__(self, root):
         self.root = root
@@ -180,7 +319,11 @@ class Engine(object):
         self.pipe = None
         self.lama = None
         self.device = None
+        self.text_encoder = None
         self.embed_cache = {}
+        self.disk_cache = EmbedCache(os.path.join(root, "cache", "embeds"), embed_key(self.manifest))
+        self._encoder_lock = threading.Lock()     # the background read vs. a prompt
+        self._gpu_lock = threading.Lock()         # a job vs. the background warm-up
 
     def _path(self, key):
         return os.path.join(self.root, self.manifest[key])
@@ -238,6 +381,7 @@ class Engine(object):
         self.pipe.vae.enable_tiling()
         self.pipe.set_progress_bar_config(disable=True)
         log("FLUX.1 Fill loaded in %.1fs", time.time() - t0)
+        self.preload_text_encoder()
 
     def _load_klein(self, job):
         """FLUX.2 [klein] 4B (Apache 2.0). The 8 GB Qwen3 text encoder stays on disk
@@ -255,68 +399,137 @@ class Engine(object):
         self.pipe.set_progress_bar_config(disable=True)
         log("FLUX.2 [klein] loaded in %.1fs (distilled: %s)", time.time() - t0,
             self.pipe.config.get("is_distilled"))
+        self.preload_text_encoder()
 
-    # -- prompt encoding: the text encoders are big, so they visit the GPU only briefly ----
+    # -- prompt encoding -------------------------------------------------------------------
+    # The text encoders (T5 9.5 GB, Qwen3 8 GB) don't fit on a 12 GB GPU next to the
+    # transformer. They used to swap places with it, which on a busy machine meant
+    # minutes of paging. Now the encoder sits in RAM and streams through the GPU one
+    # block at a time while the transformer stays put; results are cached on disk.
     def encode(self, prompt, job):
         if prompt in self.embed_cache:
             return self.embed_cache[prompt]
-        if self.family == KLEIN:
-            result = self._encode_klein(prompt, job)
-            if len(self.embed_cache) > 16:
-                self.embed_cache.clear()
-            self.embed_cache[prompt] = result
-            return result
-        import torch
-        from transformers import T5EncoderModel
-        job.progress(0.02, "Reading the prompt...")
-        log("before T5: %s", memory_status())
-        pipe = self.pipe
-        pipe.transformer.to("cpu")
-        torch.cuda.empty_cache() if self.device == "cuda" else None
-        t5 = None
-        try:
-            t5 = T5EncoderModel.from_pretrained(self._path("t5_dir"), torch_dtype=torch.bfloat16,
-                                                device_map={"": self.device})
-            log("T5 loaded to %s", self.device)
-            pipe.text_encoder_2 = t5
-            with torch.no_grad():
-                pe, ppe, _ids = pipe.encode_prompt(prompt=prompt, prompt_2=prompt,
-                                                   device=self.device, max_sequence_length=512)
-            result = (pe.detach(), ppe.detach())
-        finally:
-            pipe.text_encoder_2 = None
-            del t5
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
-            pipe.transformer.to(self.device)
+        result = self.disk_cache.get(prompt)
+        if result is not None:
+            result = tuple(t.to(self.device) for t in result)
+            log("prompt embeddings from the disk cache")
+        else:
+            job.progress(0.02, "Reading the prompt...")
+            t0 = time.time()
+            result = self._encode_with_text_encoder(prompt)
+            log("prompt read in %.1fs", time.time() - t0)
+            self.disk_cache.put(prompt, result)
         if len(self.embed_cache) > 16:
             self.embed_cache.clear()
         self.embed_cache[prompt] = result
         return result
 
-    def _encode_klein(self, prompt, job):
+    def _encode_with_text_encoder(self, prompt):
+        with self._encoder_lock:          # waits for a background read in progress
+            return self._run_text_encoder(prompt)
+
+    def _run_text_encoder(self, prompt):
         import torch
-        from transformers import Qwen3ForCausalLM
-        job.progress(0.02, "Reading the prompt...")
+        encoder = self._text_encoder()
         pipe = self.pipe
-        pipe.transformer.to("cpu")
-        torch.cuda.empty_cache()
-        encoder = None
+        t0 = time.time()
         try:
-            encoder = Qwen3ForCausalLM.from_pretrained(
-                os.path.join(self._path("model_dir"), "text_encoder"), torch_dtype=torch.bfloat16,
-                device_map={"": self.device})
-            log("klein text encoder loaded to %s", self.device)
-            pipe.text_encoder = encoder
             with torch.no_grad():
-                embeds, _ids = pipe.encode_prompt(prompt=prompt, device=self.device,
-                                                  max_sequence_length=512)
-            return (embeds.detach(),)
+                if self.family == KLEIN:
+                    pipe.text_encoder = encoder
+                    embeds, _ids = pipe.encode_prompt(prompt=prompt, device=self.device,
+                                                      max_sequence_length=512)
+                    result = (embeds.detach(),)
+                else:
+                    pipe.text_encoder_2 = encoder
+                    pe, ppe, _ids = pipe.encode_prompt(prompt=prompt, prompt_2=prompt,
+                                                       device=self.device, max_sequence_length=512)
+                    result = (pe.detach(), ppe.detach())
+            log("text encoder ran in %.1fs", time.time() - t0)
+            return result
         finally:
-            pipe.text_encoder = None
+            if self.family == KLEIN:
+                pipe.text_encoder = None
+            else:
+                pipe.text_encoder_2 = None
             del encoder
-            torch.cuda.empty_cache()
-            pipe.transformer.to(self.device)
+            self._maybe_free_text_encoder()
+
+    def _text_encoder(self):
+        """The text encoder in RAM, streaming through the GPU (see stream_blocks)."""
+        if self.text_encoder is not None:
+            return self.text_encoder
+        import torch
+        log("before text encoder: %s", memory_status())
+        t0 = time.time()
+        if self.family == KLEIN:
+            from transformers import Qwen3ForCausalLM
+            enc = Qwen3ForCausalLM.from_pretrained(
+                os.path.join(self._path("model_dir"), "text_encoder"), torch_dtype=torch.bfloat16)
+            stream_blocks(enc, enc.model.layers, self.device)
+        else:
+            from transformers import T5EncoderModel
+            enc = T5EncoderModel.from_pretrained(self._path("t5_dir"), torch_dtype=torch.bfloat16)
+            stream_blocks(enc, enc.encoder.block, self.device)
+        enc.eval()
+        log("text encoder read into RAM in %.1fs: %s", time.time() - t0, memory_status())
+        self.text_encoder = enc
+        return enc
+
+    def _text_encoder_bytes(self):
+        if self.family == KLEIN:
+            folder = os.path.join(self._path("model_dir"), "text_encoder")
+        else:
+            folder = self._path("t5_dir")
+        try:
+            return sum(os.path.getsize(os.path.join(folder, f)) for f in os.listdir(folder)
+                       if f.endswith(".safetensors"))
+        except OSError:
+            return 0
+
+    def preload_text_encoder(self):
+        """Read the text encoder into RAM in the background right after the model
+        loads, so the first prompt doesn't wait for it (~60 s from a hard disk).
+        Only when RAM has room for it and still KEEP_TEXT_ENCODER_FREE to spare."""
+        free = memory_free()
+        need = self._text_encoder_bytes() + KEEP_TEXT_ENCODER_FREE
+        if free is None or free[0] < need:
+            log("text encoder not read ahead (RAM free %s, needs %.1f GB)",
+                "?" if free is None else "%.1f GB" % (free[0] / 1e9), need / 1e9)
+            return None
+
+        def read():
+            with self._encoder_lock:
+                try:
+                    self._text_encoder()
+                    # Encode the empty prompt (used for removals) if no job is running:
+                    # it also warms up the GPU kernels, which saves ~3 s on the first
+                    # real prompt. A job waits for this (a few seconds) to share VRAM.
+                    if self._gpu_lock.acquire(False):
+                        try:
+                            self.disk_cache.put("", self._run_text_encoder(""))
+                        finally:
+                            self._gpu_lock.release()
+                    self._maybe_free_text_encoder()
+                except Exception:
+                    self.text_encoder = None
+                    log("reading the text encoder ahead failed (will retry on the first "
+                        "prompt):\n%s", traceback.format_exc())
+
+        thread = threading.Thread(target=read, name="text-encoder", daemon=True)
+        thread.start()
+        return thread
+
+    def _maybe_free_text_encoder(self):
+        """Keep the text encoder in RAM for the next prompt only while that leaves
+        Windows plenty of room; otherwise give the memory back to Nuke."""
+        free = memory_free()
+        if free is not None and min(free) >= KEEP_TEXT_ENCODER_FREE:
+            return
+        self.text_encoder = None
+        import gc
+        gc.collect()
+        log("text encoder freed (RAM is short): %s", memory_status())
 
     def run_lama(self, image, mask):
         """image: float32 (H, W, 3) in 0..1, mask: PIL 'L'. Returns float32 (H, W, 3)."""
@@ -394,6 +607,10 @@ class Engine(object):
         return np.asarray(out.images[0], dtype=np.float32)    # float, never 8-bit
 
     def generate(self, job):
+        with self._gpu_lock:
+            return self._generate(job)
+
+    def _generate(self, job):
         import torch
         from PIL import Image
         m = job.msg
@@ -422,6 +639,7 @@ class Engine(object):
                 job.progress(0.01, "Removing with LaMa...")
                 prefill = self.run_lama(image, mask)
             embeds = self.encode(prompt, job)
+            job.progress(0.05, "Generating variation 1 of %d..." % count)
             for i in range(count):
                 job.check()
                 if removal and i == 0:

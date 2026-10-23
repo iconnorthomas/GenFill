@@ -397,5 +397,152 @@ class IdleSettingTests(unittest.TestCase):
             c.stop()
 
 
+def _pickle_save(value, path):
+    import pickle
+    with open(path, "wb") as fh:
+        pickle.dump(value, fh)
+
+
+def _pickle_load(path):
+    import pickle
+    with open(path, "rb") as fh:
+        return pickle.load(fh)
+
+
+class _FakeTensor(object):
+    """Stands in for a torch tensor: the engine only moves cached embeddings."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def to(self, device):
+        return self
+
+    def __eq__(self, other):
+        return isinstance(other, _FakeTensor) and other.value == self.value
+
+
+class EmbedCacheTests(unittest.TestCase):
+    """The on-disk prompt embedding cache (no PyTorch: values are pickled)."""
+
+    def setUp(self):
+        from genfill.localai import worker
+        self.worker = worker
+        self.tmp = tempfile.mkdtemp()
+        self.folder = os.path.join(self.tmp, "embeds")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def cache(self, key="model-a", **kw):
+        return self.worker.EmbedCache(self.folder, key, save=_pickle_save, load=_pickle_load, **kw)
+
+    def test_round_trip_and_keys(self):
+        c = self.cache()
+        self.assertIsNone(c.get("a cat"))
+        c.put("a cat", ("pe", "ppe"))
+        self.assertEqual(self.cache().get("a cat"), ("pe", "ppe"))   # survives a new instance
+        self.assertIsNone(c.get("a dog"))
+        self.assertIsNone(c.get("a cat "))                  # exact prompt only
+        self.assertIsNone(self.cache("model-b").get("a cat"))
+        self.assertEqual(os.listdir(self.folder), [os.path.basename(c.path("a cat"))])
+
+    def test_least_recently_used_files_are_pruned(self):
+        c = self.cache(max_files=2)
+        c.put("one", (1,))
+        c.put("two", (2,))
+        old = time.time() - 100
+        os.utime(c.path("one"), (old, old))
+        os.utime(c.path("two"), (old - 50, old - 50))
+        self.assertEqual(c.get("two"), (2,))                # reading it makes it recent
+        c.put("three", (3,))
+        self.assertIsNone(c.get("one"))
+        self.assertEqual(c.get("two"), (2,))
+        self.assertEqual(c.get("three"), (3,))
+
+    def test_broken_files_and_folders_are_just_misses(self):
+        c = self.cache()
+        os.makedirs(self.folder)
+        with open(c.path("a cat"), "wb") as fh:
+            fh.write(b"not a pickle")
+        self.assertIsNone(c.get("a cat"))
+        self.assertFalse(os.path.exists(c.path("a cat")))   # removed so it's rewritten
+        not_a_folder = os.path.join(self.tmp, "a_file")
+        open(not_a_folder, "w").close()
+        blocked = self.worker.EmbedCache(os.path.join(not_a_folder, "sub"), "k",
+                                         save=_pickle_save, load=_pickle_load)
+        blocked.put("a cat", (1,))                         # can't create the folder: no error
+        self.assertIsNone(blocked.get("a cat"))
+
+    def test_key_follows_model_and_install(self):
+        key = self.worker.embed_key
+        flux = {"family": "flux1-fill", "installed": "2026-10-19T00:12:46",
+                "t5_dir": "models/t5", "clip_dir": "models/clip"}
+        self.assertEqual(key(flux), key(dict(flux)))
+        self.assertNotEqual(key(flux), key(dict(flux, installed="2026-10-23T09:00:00")))
+        self.assertNotEqual(key(flux), key(dict(flux, family="flux2-klein")))
+        self.assertEqual(key(dict(flux, family=None)), key(flux))   # old installs are FLUX.1
+
+    def test_engine_reads_each_prompt_once(self):
+        import json
+        with open(os.path.join(self.tmp, "manifest.json"), "w") as fh:
+            json.dump({"family": "flux1-fill", "installed": "x"}, fh)
+        calls = []
+
+        def make_engine():
+            eng = self.worker.Engine(self.tmp)
+            eng.device = "cuda"
+            eng.disk_cache._save, eng.disk_cache._load = _pickle_save, _pickle_load
+            eng._encode_with_text_encoder = lambda p: calls.append(p) or (_FakeTensor(p),)
+            return eng
+
+        class FakeJob(object):
+            def progress(self, fraction, message):
+                pass
+
+        eng = make_engine()
+        self.assertEqual(eng.encode("a cat", FakeJob()), (_FakeTensor("a cat"),))
+        eng.encode("a cat", FakeJob())                      # memory cache
+        self.assertEqual(calls, ["a cat"])
+        restarted = make_engine()                          # new helper process
+        self.assertEqual(restarted.encode("a cat", FakeJob()), (_FakeTensor("a cat"),))
+        self.assertEqual(calls, ["a cat"])
+        restarted.encode("a dog", FakeJob())
+        self.assertEqual(calls, ["a cat", "a dog"])
+        self.assertTrue(os.path.isdir(os.path.join(self.tmp, "cache", "embeds")))
+
+    def test_text_encoder_is_read_ahead_only_with_room(self):
+        import json
+        os.makedirs(os.path.join(self.tmp, "models", "t5"))
+        with open(os.path.join(self.tmp, "models", "t5", "model.safetensors"), "wb") as fh:
+            fh.write(b"x" * 1000)
+        with open(os.path.join(self.tmp, "manifest.json"), "w") as fh:
+            json.dump({"family": "flux1-fill", "t5_dir": "models/t5"}, fh)
+        eng = self.worker.Engine(self.tmp)
+        reads = []
+        eng._text_encoder = lambda: reads.append(1) or setattr(eng, "text_encoder", "T5")
+        warmups = []
+        eng._run_text_encoder = lambda p: warmups.append(p) or (_FakeTensor(p),)
+        eng.disk_cache._save, eng.disk_cache._load = _pickle_save, _pickle_load
+        keep = self.worker.KEEP_TEXT_ENCODER_FREE
+        with mock.patch.object(self.worker, "memory_free", return_value=(keep + 999, keep)):
+            self.assertIsNone(eng.preload_text_encoder())    # 1 byte short of size + headroom
+        with mock.patch.object(self.worker, "memory_free", return_value=None):
+            self.assertIsNone(eng.preload_text_encoder())    # can't tell: don't
+        self.assertEqual(reads, [])
+        with mock.patch.object(self.worker, "memory_free", return_value=(keep + 1000, keep)):
+            eng.preload_text_encoder().join(10)
+        self.assertEqual((reads, eng.text_encoder), ([1], "T5"))
+        self.assertEqual(warmups, [""])                    # the removal prompt, read ahead
+        self.assertEqual(eng.disk_cache.get(""), (_FakeTensor(""),))
+        with eng._gpu_lock:                                # a job is running: no warm-up
+            with mock.patch.object(self.worker, "memory_free", return_value=(keep + 1000, keep)):
+                eng.preload_text_encoder().join(10)
+        self.assertEqual(warmups, [""])
+        with mock.patch.object(self.worker, "memory_free", return_value=(keep + 1000, keep - 1)):
+            eng.preload_text_encoder().join(10)
+        self.assertIsNone(eng.text_encoder)               # read, but then short: freed
+
+
 if __name__ == "__main__":
     unittest.main()
