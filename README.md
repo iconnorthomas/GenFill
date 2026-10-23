@@ -457,6 +457,10 @@ The network is used only by the **installer**, and only to download uv (GitHub),
 (PyPI and the official PyTorch index) and model files (Hugging Face, GitHub). Nothing about your
 images or prompts is sent.
 
+**GenFill > Check for Updates...** asks GitHub for the latest GenFill version, only when you click
+it. It sends nothing but a normal web request with GenFill's version in the User-Agent, and it
+never downloads or installs anything: it tells you what's available and can open the download page.
+
 **Cloud models (Stability AI, OpenAI) are different:** the crop around your selection (not the
 whole frame) and the prompt are uploaded to that company. Use them only when your client / TPN
 rules allow it.
