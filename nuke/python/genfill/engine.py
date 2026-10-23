@@ -225,6 +225,7 @@ def refresh_result(node):
     read = _internal(node, gfnode.READ_RESULT)
     if _fwd(read["file"].value()) != _fwd(path):
         read["file"].setValue(_fwd(path))
+        _reload(read)
     _configure_decode(node, gen)
     x, y, w, h = gen["region"]
     ref = _internal(node, gfnode.REFORMAT_RECV)
@@ -241,6 +242,19 @@ def refresh_result(node):
     if len(prompt) > 28:
         prompt = prompt[:27] + u"…"
     node["gf_info"].setValue("%s  (%d/%d)" % (prompt, idx, len(order)))
+
+
+def _reload(read):
+    """Press the Read's Reload. Variations stream into the job folder one by one, and a
+    Read that looked there before a file existed keeps showing its error checkerboard for
+    that file until Nuke restarts or the Read is reloaded."""
+    knob = read.knobs().get("reload")
+    if knob is None:
+        return
+    try:
+        knob.execute()
+    except Exception:
+        gflog.exception("could not reload %s", read.name())
 
 
 def _configure_decode(node, gen):
@@ -584,8 +598,11 @@ def _main_thread_dispatch(fn, args):
 def _worker(node, uid, backend, request, api_key, meta, job_dir,
             dispatch=_main_thread_dispatch, show_progress=True):
     dispatched = [False]
+    saved = {}      # variation index -> relative path (this thread only)
+    shared = {}     # bookkeeping for _apply_variations (main thread only)
 
     def send(fn, args):
+        """Dispatch the final result; only one of these per generation."""
         dispatched[0] = True
         dispatch(fn, args)
 
@@ -609,12 +626,12 @@ def _worker(node, uid, backend, request, api_key, meta, job_dir,
                 requested = _jobs.get(uid, {}).get("cancel_requested", False)
             return requested or task.isCancelled()
 
-        _set_status(uid, message="Generating...", progress=0.05, cancel_requested=False)
-        images = backend.generate(request, api_key, progress=progress, cancelled=cancelled)
-        gflog.info("%s returned %d image(s)", backend.id, len(images))
-        files = []
         ext = getattr(backend, "result_ext", ".png")
-        for i, item in enumerate(images):
+
+        def save(i, item):
+            """Write variation ``i`` once; returns its relative path, or None if already saved."""
+            if i in saved:
+                return None
             data, preview = item if isinstance(item, tuple) else (item, None)
             name = "var_%02d%s" % (i + 1, ext)
             with open(os.path.join(job_dir, name), "wb") as fh:
@@ -622,23 +639,56 @@ def _worker(node, uid, backend, request, api_key, meta, job_dir,
             if preview:
                 with open(os.path.join(job_dir, "var_%02d_preview.png" % (i + 1)), "wb") as fh:
                     fh.write(preview)
-            files.append("%s/%s" % (meta["id"], name))
-        meta["files"] = files
-        send(_finish, (node, uid, meta))
+            saved[i] = "%s/%s" % (meta["id"], name)
+            return saved[i]
+
+        def on_image(i, item):
+            # Streaming backends hand over each variation as soon as it's done, so the
+            # artist can look at (or keep) the first one while the rest are generated.
+            rel = save(i, item)
+            if rel:
+                gflog.info("variation %d of %d ready: %s", i + 1, request.count, rel)
+                dispatch(_apply_streamed, (node, meta, [rel], shared))
+
+        _set_status(uid, message="Generating...", progress=0.05, cancel_requested=False)
+        images = backend.generate(request, api_key, progress=progress, cancelled=cancelled,
+                                  on_image=on_image)
+        gflog.info("%s returned %d image(s)", backend.id, len(images))
+        late = [rel for rel in (save(i, item) for i, item in enumerate(images)) if rel]
+        meta["files"] = _kept(saved)
+        send(_finish, (node, uid, meta, late, shared))
     except Cancelled:
-        gflog.info("Generation cancelled")
-        send(_fail, (node, uid, meta, "Cancelled.", False))
+        gflog.info("Generation cancelled after %d variation(s)", len(saved))
+        meta["files"] = _kept(saved)
+        if saved:
+            send(_finish, (node, uid, meta, [], shared,
+                           "Cancelled; kept %d of %d." % (len(saved), request.count)))
+        else:
+            send(_fail, (node, uid, meta, "Cancelled.", False))
     except BackendError as exc:
         gflog.error("Backend error: %s", exc)
-        send(_fail, (node, uid, meta, str(exc), show_progress))
+        meta["files"] = _kept(saved)
+        if saved:
+            send(_finish, (node, uid, meta, [], shared, "", str(exc), show_progress))
+        else:
+            send(_fail, (node, uid, meta, str(exc), show_progress))
     except Exception as exc:
         gflog.exception("Unexpected error while generating")
-        send(_fail, (node, uid, meta, "Unexpected error: %s" % exc, show_progress))
+        message = "Unexpected error: %s" % exc
+        meta["files"] = _kept(saved)
+        if saved:
+            send(_finish, (node, uid, meta, [], shared, "", message, show_progress))
+        else:
+            send(_fail, (node, uid, meta, message, show_progress))
     finally:
         task = None
         if not dispatched[0]:
             # Never leave the node stuck in "running".
             _set_status(uid, running=False, error="Generation stopped unexpectedly (see log).")
+
+
+def _kept(saved):
+    return [saved[i] for i in sorted(saved)]
 
 
 def _node_alive(node):
@@ -649,23 +699,53 @@ def _node_alive(node):
         return False
 
 
-def _finish(node, uid, meta):
+def _apply_variations(node, meta, rels, shared):
+    """Main thread: add finished variations to this generation. The first one creates
+    the generation and selects it; later ones are appended without moving the selection."""
+    if not rels or not _node_alive(node):
+        return
+    st = get_state(node)
+    gi = next((i for i, g in enumerate(st["generations"]) if g.get("id") == meta["id"]), None)
+    if gi is None:
+        if shared.get("created"):
+            gflog.info("generation %s was deleted while running; dropping %s", meta["id"], rels)
+            return
+        gen = dict(meta, files=list(rels))
+        gen.pop("prev_frame", None)
+        st = gfstate.add_generation(st, gen, select_first=True)
+        shared["created"] = True
+    else:
+        st["generations"][gi]["files"].extend(rels)
+    _save_state(node, st)
+    readback = get_state(node)
+    if len(readback["generations"]) != len(st["generations"]):
+        gflog.warning("State did not stick: wrote %d generation(s), read back %d",
+                      len(st["generations"]), len(readback["generations"]))
+    refresh_result(node)
+
+
+def _apply_streamed(node, meta, rels, shared):
+    try:
+        _apply_variations(node, meta, rels, shared)
+    except Exception:   # the final _finish reports problems; don't lose the job over one
+        gflog.exception("Showing variation %s early failed", rels)
+
+
+def _finish(node, uid, meta, rels, shared, message="", error="", show=False):
+    """Main thread: apply the variations that weren't streamed and end the job.
+    ``message``/``error`` describe a run that stopped early but kept some variations."""
     try:
         if not _node_alive(node):
             gflog.warning("Node was deleted before the result arrived")
+            _set_status(uid, running=False, progress=0.0, message="", error="")
             return
-        meta = dict(meta)
-        meta.pop("prev_frame", None)
-        st = gfstate.add_generation(get_state(node), meta, select_first=True)
-        _save_state(node, st)
-        readback = get_state(node)
-        if len(readback["generations"]) != len(st["generations"]):
-            gflog.warning("State did not stick: wrote %d generation(s), read back %d",
-                          len(st["generations"]), len(readback["generations"]))
-        refresh_result(node)
-        gflog.info("Added generation %s with %d variation(s); selected the first",
-                   meta["id"], len(meta.get("files", [])))
-        _set_status(uid, running=False, progress=1.0, message="", error="")
+        _apply_variations(node, meta, rels, shared)
+        gflog.info("Generation %s finished with %d variation(s)%s", meta["id"],
+                   len(meta.get("files", [])), (": " + (error or message)) if error or message else "")
+        _set_status(uid, running=False, progress=1.0, message=message, error=error)
+        if error and show:
+            _notify("Generative Fill stopped early:\n\n%s\n\nThe variations finished before "
+                    "that were kept." % error)
     except Exception as exc:
         gflog.exception("Applying the generated result failed")
         _set_status(uid, running=False, progress=0.0, message="",

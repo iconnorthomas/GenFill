@@ -77,6 +77,9 @@ class Knob(object):
     def setLabel(self, t):
         self.label = t
 
+    def execute(self):
+        self.executed = getattr(self, "executed", 0) + 1
+
     def setRange(self, a, b):
         pass
 
@@ -152,6 +155,8 @@ class Node(object):
         self._format = Format(1920, 1080)
         if cls == "Roto":
             self._knobs["curves"] = CurvesKnob("curves")
+        if cls == "Read":
+            self._knobs["reload"] = Knob("reload")
         for k, v in kw.items():
             self[k].setValue(v)
         self._parent = _context[-1] if _context else None

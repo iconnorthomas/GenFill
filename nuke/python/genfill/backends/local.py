@@ -33,6 +33,18 @@ class NotInstalled(BackendError):
     pass
 
 
+def _read_result(path):
+    """(float TIFF bytes, 8-bit preview PNG bytes or None) for one helper output."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    preview = None
+    ppath = os.path.splitext(path)[0] + "_preview.png"
+    if os.path.exists(ppath):
+        with open(ppath, "rb") as fh:
+            preview = fh.read()
+    return data, preview
+
+
 class LocalBackend(Backend):
     id = "local"
     label = "Local AI (free, runs on your GPU)"
@@ -71,7 +83,7 @@ class LocalBackend(Backend):
         table = KLEIN_STEPS if self.family() == "flux2-klein" else QUALITY_STEPS
         return table.get(quality, table["auto"])
 
-    def generate(self, request, api_key, progress=None, cancelled=None):
+    def generate(self, request, api_key, progress=None, cancelled=None, on_image=None):
         from .. import localai
         from ..localai.client import WorkerError, get_client
         if not localai.is_installed():
@@ -94,8 +106,14 @@ class LocalBackend(Backend):
         client = get_client()
         if progress and not client.is_running():
             progress(0.0, "Starting the local AI...")
+
+        def on_result(ev):
+            if on_image:
+                on_image(int(ev["index"]), _read_result(ev["file"]))
+
         try:
-            done = client.request("generate", payload, progress=progress, cancelled=cancelled)
+            done = client.request("generate", payload, progress=progress, cancelled=cancelled,
+                                  on_result=on_result)
         except WorkerError as exc:
             if exc.cancelled:
                 raise Cancelled("Cancelled")
@@ -107,16 +125,7 @@ class LocalBackend(Backend):
             except Exception:
                 pass
             raise BackendError(str(exc))
-        results = []
-        for path in done.get("files", []):
-            with open(path, "rb") as fh:
-                data = fh.read()
-            preview = None
-            ppath = os.path.splitext(path)[0] + "_preview.png"
-            if os.path.exists(ppath):
-                with open(ppath, "rb") as fh:
-                    preview = fh.read()
-            results.append((data, preview))
+        results = [_read_result(path) for path in done.get("files", [])]
         if not results:
             raise BackendError("The local AI returned no images.")
         return results

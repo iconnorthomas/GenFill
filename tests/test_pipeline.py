@@ -295,6 +295,83 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse(engine.is_running(self.g))
         self.assertIn("boom", engine.status(self.g)["error"])
 
+    def _streaming_backend(self, deliver, then):
+        """A backend that streams ``deliver`` variations, then raises ``then`` (or returns)."""
+        mock_backend = engine.backends.get("mock")
+
+        def generate(request, api_key, progress=None, cancelled=None, on_image=None):
+            out = []
+            for i in range(deliver):
+                out.append(pngio.encode(pngio.Image(request.width, request.height, 3)))
+                on_image(i, out[-1])
+                seen.append(len(engine.get_state(self.g)["generations"]))
+            if then is not None:
+                raise then
+            return out
+        seen = []
+        return mock.patch.object(mock_backend, "generate", side_effect=generate), seen
+
+    def test_variations_appear_as_each_one_finishes(self):
+        patch, seen = self._streaming_backend(3, None)
+        with patch:
+            self.assertTrue(engine.generate(self.g, "a car", blocking=True))
+        # Blocking dispatch applies each one straight away: 1 generation from the first image on.
+        self.assertEqual(seen, [1, 1, 1])
+        gen = engine.get_state(self.g)["generations"][-1]
+        self.assertEqual([os.path.basename(f) for f in gen["files"]],
+                         ["var_01.png", "var_02.png", "var_03.png"])
+        self.assertEqual(state.selected(engine.get_state(self.g)), (0, 0))   # first stays selected
+        self.assertFalse(engine.is_running(self.g))
+
+    def test_switching_variation_reloads_the_result_read(self):
+        # Nuke keeps showing the error checkerboard for a file a Read looked for before it
+        # existed, which streaming makes likely, so each switch presses Reload.
+        self.assertTrue(engine.generate(self.g, "a car", blocking=True))
+        reload_knob = self.g.node(gfnode.READ_RESULT)["reload"]
+        before = getattr(reload_knob, "executed", 0)
+        engine.select(self.g, 0, 1)
+        self.assertEqual(reload_knob.executed, before + 1)
+        engine.select(self.g, 0, 1)                  # same file again: no reload needed
+        self.assertEqual(reload_knob.executed, before + 1)
+        engine.step(self.g, 1)
+        self.assertEqual(reload_knob.executed, before + 2)
+
+    def test_cancel_keeps_the_variations_already_made(self):
+        from genfill.backends import Cancelled
+        patch, _seen = self._streaming_backend(1, Cancelled("Cancelled"))
+        with patch:
+            engine.generate(self.g, "a car", blocking=True)
+        st = engine.status(self.g)
+        self.assertFalse(st["running"])
+        self.assertEqual(st["error"], "")
+        self.assertIn("kept 1 of 3", st["message"])
+        gen = engine.get_state(self.g)["generations"][-1]
+        self.assertEqual(len(gen["files"]), 1)
+        self.assertTrue(self.g["gf_has_result"].value())
+        self.assertEqual(int(self.g["gf_frame"].value()), gen["frame"])
+
+    def test_error_midway_keeps_variations_and_reports(self):
+        from genfill.backends import BackendError
+        patch, _seen = self._streaming_backend(2, BackendError("GPU fell over"))
+        with patch:
+            self.assertFalse(engine.generate(self.g, "a car", blocking=True))
+        self.assertIn("GPU fell over", engine.status(self.g)["error"])
+        self.assertEqual(len(engine.get_state(self.g)["generations"][-1]["files"]), 2)
+
+    def test_deleting_a_running_generation_isnt_undone_by_later_variations(self):
+        mock_backend = engine.backends.get("mock")
+
+        def generate(request, api_key, progress=None, cancelled=None, on_image=None):
+            out = [pngio.encode(pngio.Image(request.width, request.height, 3)) for _ in range(2)]
+            on_image(0, out[0])
+            engine.delete_variation(self.g, 0, 0)       # the artist deletes it mid-run
+            on_image(1, out[1])
+            return out
+        with mock.patch.object(mock_backend, "generate", side_effect=generate):
+            engine.generate(self.g, "a car", blocking=True)
+        self.assertEqual(engine.get_state(self.g)["generations"], [])
+        self.assertFalse(engine.is_running(self.g))
+
     def test_log_file_written(self):
         from genfill import log as gflog
         engine.generate(self.g, "logged prompt", blocking=True)

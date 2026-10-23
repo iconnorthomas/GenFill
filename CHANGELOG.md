@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Each variation shows up as soon as it's done.** With the Local AI, Stability AI and Offline
+  Preview, the first variation appears in the panel (and the Viewer) while the others are still
+  being generated, instead of after all of them. On the Local AI that's about a minute sooner per
+  extra variation. Cancel now keeps the variations already finished ("Cancelled; kept 1 of 3"),
+  and an error part-way through keeps them too. OpenAI returns all variations in one response,
+  so it's unchanged. Switching variation reloads the node's internal Read, so a variation that
+  arrived after the first one never shows Nuke's error checkerboard.
+
 - **Fix: GenFill on Nuke Indie / Non-commercial** (#3, #5). Those licenses let Python retrieve
   only 10 nodes per script. Creating a node walked every node in the script to deselect it, so
   in any real comp it failed with "the 10-node limit for Node objects accessible in Python has
