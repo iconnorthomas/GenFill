@@ -319,6 +319,62 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("Source", engine.status(self.g)["error"])
 
 
+class IndieTests(unittest.TestCase):
+    """Nuke Indie / Non-commercial: Python may retrieve only 10 nodes (issues #3, #5)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        fake_nuke._root.script_path = os.path.join(self.tmp, "shot.nk")
+        fake_nuke.env["indie"] = True
+        # An existing comp: far more than 10 nodes.
+        self.comp = [nuke.nodes.Blur(name="IndieBlur%d" % i) for i in range(25)]
+        self.plate = nuke.nodes.Read(name="IndiePlate")
+        fake_nuke.SELECTED[:] = [self.plate]
+        fake_nuke.RETRIEVED[0] = 0
+
+    def tearDown(self):
+        fake_nuke.env["indie"] = False
+        fake_nuke.SELECTED[:] = []
+        for n in self.comp + [self.plate]:
+            fake_nuke.delete(n)
+        shutil.rmtree(self.tmp)
+
+    def _create(self):
+        g = gfnode.create()
+        fake_nuke.add_shape(g.node(gfnode.ROTO))
+        g["gf_backend"].setValue([l for l in gfnode.backend_labels() if "Offline" in l][0])
+        return g
+
+    def test_create_in_existing_script_stays_under_the_limit(self):
+        g = self._create()
+        self.assertIsNotNone(g)
+        self.assertIs(g.input(0), self.plate)          # still connects to the selected node
+        self.assertEqual(fake_nuke.SELECTED, [])        # and deselects the rest
+        self.assertLessEqual(fake_nuke.RETRIEVED[0], 1)
+
+    def test_generate_and_delete_retrieve_no_nodes(self):
+        g = self._create()
+        fake_nuke.RETRIEVED[0] = 0
+        self.assertTrue(engine.generate(g, "a car", blocking=True), engine.status(g))
+        engine.delete_variation(g, 0, 0)
+        self.assertEqual(fake_nuke.RETRIEVED[0], 0)
+
+    def test_copied_node_still_gets_its_own_uid(self):
+        g = self._create()
+        copy = self._create()
+        copy.setName("IndieCopy")
+        copy["gf_uid"].setValue(g["gf_uid"].value())
+        self.assertTrue(engine.ensure_unique_uid(copy))
+        self.assertNotEqual(copy["gf_uid"].value(), g["gf_uid"].value())
+        fake_nuke.delete(copy)
+
+    def test_env_var_forces_limited_mode(self):
+        fake_nuke.env["indie"] = False
+        self.assertFalse(gfnode.limited_python())
+        with mock.patch.dict(os.environ, {"GENFILL_LIMITED_PYTHON": "1"}):
+            self.assertTrue(gfnode.limited_python())
+
+
 class DevtoolsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

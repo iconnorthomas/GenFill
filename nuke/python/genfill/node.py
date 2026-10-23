@@ -21,6 +21,7 @@ Internal graph::
 """
 from __future__ import annotations
 
+import os
 import uuid
 
 import nuke
@@ -704,12 +705,50 @@ def _creation_failed(group, exc):
                  "Please include it when reporting this." % (type(exc).__name__, exc, where))
 
 
+def limited_python():
+    """True in Nuke Indie / Non-commercial, where Python may only retrieve 10 nodes
+    per script (issues #3, #5). Code that would walk the whole script must not run
+    there. GENFILL_LIMITED_PYTHON=1 forces it, to test the Indie paths on full Nuke."""
+    if os.environ.get("GENFILL_LIMITED_PYTHON", "").strip() in ("1", "true", "yes"):
+        return True
+    env = getattr(nuke, "env", None) or {}
+    try:
+        return bool(env.get("indie") or env.get("nc"))
+    except Exception:
+        return False
+
+
+def _tcl_list(text):
+    """Split a flat TCL list of simple words (node names, uids); {} is an empty word."""
+    return [w.strip("{}") for w in (text or "").split()]
+
+
+def _selected_upstream_limited():
+    """The single selected node, retrieving at most one node object."""
+    try:
+        names = _tcl_list(nuke.tcl("selected_nodes"))
+    except Exception:
+        names = None
+    if names is not None:
+        return nuke.toNode(names[0]) if len(names) == 1 else None
+    try:
+        return nuke.selectedNode()
+    except ValueError:
+        return None
+
+
 def create():
     """Menu entry point: create a GenerativeFill node (selection drawn on the node itself)."""
-    selected = nuke.selectedNodes()
-    upstream = selected[0] if len(selected) == 1 else None
-    for n in nuke.allNodes():
-        n.setSelected(False)
+    if limited_python():
+        # Walking every node would use up Indie's 10 node retrievals in any real script.
+        upstream = _selected_upstream_limited()
+        nuke.selectAll()
+        nuke.invertSelection()
+    else:
+        selected = nuke.selectedNodes()
+        upstream = selected[0] if len(selected) == 1 else None
+        for n in nuke.allNodes():
+            n.setSelected(False)
 
     group = nuke.nodes.Group()
     try:

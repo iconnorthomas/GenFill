@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: GenFill on Nuke Indie / Non-commercial** (#3, #5). Those licenses let Python retrieve
+  only 10 nodes per script. Creating a node walked every node in the script to deselect it, so
+  in any real comp it failed with "the 10-node limit for Node objects accessible in Python has
+  been reached" (or, before 0.8.0, left an empty Group). The copy/paste check on Generate and
+  delete did the same. On those licenses GenFill now uses Nuke's TCL for both, retrieving at most
+  one node (the one you have selected, to connect to). Set `GENFILL_LIMITED_PYTHON=1` to try
+  these code paths on a full Nuke license.
+
 ## 0.8.0 - 2026-10-17
 
 - **GenFill Setup: a graphical installer for Windows, macOS and Linux** in GenFill's own dark

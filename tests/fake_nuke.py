@@ -256,8 +256,45 @@ def frame():
     return 1001
 
 
+env = {"indie": False, "nc": False}
+SELECTED = []          # top-level nodes the fake treats as selected
+RETRIEVED = [0]        # node objects handed out by the retrieval calls (Indie allows 10)
+
+
+def _retrieve(nodes):
+    RETRIEVED[0] += len(nodes)
+    return nodes
+
+
 def selectedNodes():
-    return []
+    return _retrieve(list(SELECTED))
+
+
+def selectedNode():
+    if not SELECTED:
+        raise ValueError("no node selected")
+    return _retrieve([SELECTED[-1]])[0]
+
+
+def selectAll():
+    SELECTED[:] = list(_root_nodes)
+
+
+def invertSelection():
+    SELECTED[:] = [n for n in _root_nodes if n not in SELECTED]
+
+
+def tcl(script):
+    """Only the TCL GenFill sends; anything else raises like an unknown command."""
+    if script == "selected_nodes":
+        return " ".join(n._name for n in SELECTED)
+    if "gf_uid" in script and "foreach" in script:
+        words = []
+        for n in _root_nodes:
+            if "gf_uid" in n._knobs:
+                words += [n._name, n["gf_uid"].value() or "{}"]
+        return " ".join(words)
+    raise RuntimeError("fake tcl: unknown command %r" % script)
 
 
 def allNodes(filter=None, group=None, recurseGroups=False):
@@ -265,7 +302,7 @@ def allNodes(filter=None, group=None, recurseGroups=False):
     if recurseGroups:
         for top in _root_nodes:
             found.extend(_all(top))
-    return [n for n in found if filter is None or n.Class() == filter]
+    return _retrieve([n for n in found if filter is None or n.Class() == filter])
 
 
 def show(n):
@@ -298,7 +335,7 @@ def delete(n):
 def toNode(name):
     for n in _root_nodes:
         if n._name == name:
-            return n
+            return _retrieve([n])[0]
     return None
 
 

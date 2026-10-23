@@ -55,12 +55,26 @@ def _uid(node):
     return node["gf_uid"].value()
 
 
-def _genfill_nodes():
+# TCL, so Nuke Indie doesn't count a node retrieval per node in the script.
+# Top level only: copies inside other Groups aren't seen there.
+_UIDS_TCL = ("in root {set _gf {}; foreach _n [nodes] {if {[exists $_n.gf_uid]} "
+             "{lappend _gf $_n [value $_n.gf_uid]}}; set _gf}")
+
+
+def _genfill_uids():
+    """[(full name, uid)] of every GenerativeFill node in the script."""
+    if gfnode.limited_python():
+        try:
+            words = gfnode._tcl_list(nuke.tcl(_UIDS_TCL))
+        except Exception:
+            gflog.exception("could not list GenFill nodes via TCL; skipping the copy check")
+            return []
+        return list(zip(words[0::2], words[1::2]))
     try:
         nodes = nuke.allNodes("Group", recurseGroups=True)
     except TypeError:
         nodes = nuke.allNodes()
-    return [n for n in nodes if "gf_uid" in n.knobs()]
+    return [(n.fullName(), _uid(n)) for n in nodes if "gf_uid" in n.knobs()]
 
 
 def ensure_unique_uid(node):
@@ -69,12 +83,12 @@ def ensure_unique_uid(node):
     Returns True if the uid was changed."""
     uid = _uid(node)
     name = node.fullName()
-    for other in _genfill_nodes():
-        if other.fullName() != name and _uid(other) == uid:
+    for other_name, other_uid in _genfill_uids():
+        if other_name != name and other_uid == uid:
             new = uuid.uuid4().hex[:12]
             node["gf_uid"].setValue(new)
-            gflog.info("%s shared uid %s with %s (copy/paste); now %s", node.fullName(), uid,
-                       other.fullName(), new)
+            gflog.info("%s shared uid %s with %s (copy/paste); now %s", name, uid, other_name,
+                       new)
             return True
     return False
 
