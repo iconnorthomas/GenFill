@@ -401,6 +401,28 @@ class DevtoolsTests(unittest.TestCase):
         names = [n.name() for n in nuke.allNodes()]
         self.assertEqual(names.count(devtools.CONTAINER), 1)
 
+    def test_smoke_test_on_indie_stays_under_the_limit(self):
+        import json
+        from genfill import devtools
+        comp = [nuke.nodes.Blur(name="SmokeIndieBlur%d" % i) for i in range(25)]
+        fake_nuke.SELECTED[:] = comp[:15]
+        fake_nuke.env["indie"] = True
+        fake_nuke.RETRIEVED[0] = 0
+        try:
+            out = os.path.join(self.tmp, "out")
+            passed = devtools.run_smoke_test(out, show_result=False)
+            retrieved = fake_nuke.RETRIEVED[0]
+        finally:
+            fake_nuke.env["indie"] = False
+            fake_nuke.SELECTED[:] = []
+            for n in comp:
+                fake_nuke.delete(n)
+        with open(os.path.join(out, "report.json")) as fh:
+            report = json.load(fh)
+        self.assertTrue(passed, [s for s in report["steps"] if not s["ok"]])
+        self.assertTrue(report["limited_python"])
+        self.assertLessEqual(retrieved, 1)     # at most the old smoke-test container
+
     def test_build_info_dev_and_installed(self):
         import genfill
         self.assertIn("live from repo", genfill.build_label())

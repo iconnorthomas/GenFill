@@ -9,6 +9,11 @@
   delete did the same. On those licenses GenFill now uses Nuke's TCL for both, retrieving at most
   one node (the one you have selected, to connect to). Set `GENFILL_LIMITED_PYTHON=1` to try
   these code paths on a full Nuke license.
+- **GenFill > Developer > Run Smoke Test works on Nuke Indie / Non-commercial.** It deselected
+  every selected node one by one and listed all ~35 nodes inside the GenerativeFill node, which
+  goes over the 10-node limit. On those licenses it now deselects in one call and skips the knob
+  inventory; the report records `"limited_python": true`.
+- Tests run on GitHub Actions for every pull request (Windows with Python 3.9 to 3.11, Ubuntu with 3.11).
 
 ## 0.8.0 - 2026-10-17
 

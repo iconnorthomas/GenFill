@@ -204,7 +204,7 @@ class Node(object):
         pass
 
     def nodes(self):
-        return list(self._children)
+        return _retrieve(list(self._children))
 
     def fullName(self):
         return self._name

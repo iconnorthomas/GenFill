@@ -82,7 +82,7 @@ when you create the node. Two things differ from full Nuke:
 
 - The copy/paste check (which gives a pasted GenerativeFill its own cache folder) only sees
   nodes at the top level of the script, not copies inside other Groups.
-- **GenFill > Developer > Run Smoke Test** may still hit the limit.
+- **GenFill > Developer > Run Smoke Test** skips its knob inventory of the node's internals.
 
 To try the Indie code paths on a full license, set the environment variable
 `GENFILL_LIMITED_PYTHON=1` and restart Nuke.
