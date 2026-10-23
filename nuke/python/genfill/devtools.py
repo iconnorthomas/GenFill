@@ -244,13 +244,14 @@ def run_smoke_test(output_dir=None, show_result=True):
     engine.QUIET = True
     frame = int(nuke.frame())
     ctx = {}
+    limited = gfnode.limited_python()
+    rep.data["limited_python"] = limited
 
     def build_scene():
         old = nuke.toNode(CONTAINER)
         if old is not None:
             nuke.delete(old)
-        for n in nuke.selectedNodes():
-            n.setSelected(False)
+        gfnode.deselect_all()
         c = nuke.nodes.Group(name=CONTAINER)
         c["tile_color"].setValue(0x884444FF)
         c["label"].setValue("delete me any time")
@@ -279,6 +280,10 @@ def run_smoke_test(output_dir=None, show_result=True):
             label = [l for l in gfnode.backend_labels() if "Offline" in l][0]
             g["gf_backend"].setValue(label)
         ctx["g"] = g
+        if limited:
+            # Listing ~35 internal nodes would go over Indie's 10 node retrievals.
+            rep.data["knob_inventory"] = "skipped (Nuke Indie / Non-commercial)"
+            return {"node": g.fullName()}
         rep.data["knob_inventory"] = _knob_inventory(g)
         return {"node": g.fullName(), "internal_nodes": len(g.nodes())}
 

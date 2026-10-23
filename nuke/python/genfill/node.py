@@ -737,18 +737,25 @@ def _selected_upstream_limited():
         return None
 
 
-def create():
-    """Menu entry point: create a GenerativeFill node (selection drawn on the node itself)."""
+def deselect_all():
+    """Deselect every node in the current context."""
     if limited_python():
         # Walking every node would use up Indie's 10 node retrievals in any real script.
-        upstream = _selected_upstream_limited()
         nuke.selectAll()
         nuke.invertSelection()
     else:
-        selected = nuke.selectedNodes()
-        upstream = selected[0] if len(selected) == 1 else None
         for n in nuke.allNodes():
             n.setSelected(False)
+
+
+def create():
+    """Menu entry point: create a GenerativeFill node (selection drawn on the node itself)."""
+    if limited_python():
+        upstream = _selected_upstream_limited()
+    else:
+        selected = nuke.selectedNodes()
+        upstream = selected[0] if len(selected) == 1 else None
+    deselect_all()
 
     group = nuke.nodes.Group()
     try:
