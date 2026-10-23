@@ -103,8 +103,12 @@ class LocalBackend(Backend):
             "out_dir": out_dir,
             "preview": colorspace.preview_kind(getattr(request, "transfer", None)),
         }
+        from ..localai import warmup
         client = get_client()
-        if progress and not client.is_running():
+        if progress and warmup.is_warming():
+            # Queued behind the warm-up's load in the helper; then runs on the warm model.
+            progress(0.0, "Waiting for the local AI to finish loading...")
+        elif progress and not client.is_running():
             progress(0.0, "Starting the local AI...")
 
         def on_result(ev):

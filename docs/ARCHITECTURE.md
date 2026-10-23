@@ -96,9 +96,13 @@ Nuke (GenFill plugin)                         GenFill-LocalAI\ (outside OneDrive
 - **Why a separate process:** PyTorch and ~10 GB of model weights never load into Nuke. A crash
   or GPU out-of-memory becomes an error in the panel; Nuke and the script stay alive, and
   PyTorch's CUDA libraries can't clash with Nuke's (CopyCat/Cattery).
-- **Lifecycle:** started hidden (`CREATE_NO_WINDOW`) on the first Local generation; model stays
-  loaded between generations; exits when Nuke closes the pipe, on *Stop AI Helper*, or after
-  10 idle minutes. Nuke's `PYTHONPATH`/`PYTHONHOME` are stripped from its environment.
+- **Lifecycle:** started hidden (`CREATE_NO_WINDOW`) and told to `load` in the background
+  (`localai/warmup.py`) when a Local AI node is created, its panel opens or its model is set to
+  Local AI; otherwise on the first Local generation. Commands run one at a time, so a Generate
+  sent during the warm-up queues behind the load (a cancel reaches it while queued too). The
+  model stays loaded between generations; the helper exits when Nuke closes the pipe, on *Stop AI
+  Helper*, or after `local_ai.idle_minutes` idle minutes from config.json (default 30, 0 = never;
+  set in the Local AI dialog). Nuke's `PYTHONPATH`/`PYTHONHOME` are stripped from its environment.
 - **Memory on 12 GB GPUs:** FLUX Q4_K_S (6.8 GB) stays on the GPU. T5 (9.5 GB) is loaded straight
   to the GPU only while a new prompt is encoded (the transformer is parked in system RAM for those
   seconds), then freed. Encodings are cached per prompt.

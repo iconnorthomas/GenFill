@@ -3,8 +3,8 @@
 Starts ``worker.py`` with the private Python environment (no console window),
 sends it JSON requests over stdin and reads events from stdout. One helper is
 shared by every GenerativeFill node in the session. It is stopped when Nuke
-exits (and the helper also exits by itself if Nuke disappears or after 10
-idle minutes).
+exits (and the helper also exits by itself if Nuke disappears, or after the
+idle time set in the Local AI dialog, 30 minutes by default).
 """
 from __future__ import annotations
 
@@ -18,9 +18,8 @@ import sys
 import threading
 import time
 
-from . import WORKER_SCRIPT, env_python, log_dir, root
+from . import WORKER_SCRIPT, env_python, idle_seconds, log_dir, root
 
-IDLE_SECONDS = 600
 HELLO_TIMEOUT = 90
 CREATE_NO_WINDOW = 0x08000000
 
@@ -193,12 +192,11 @@ class WorkerError(RuntimeError):
 
 
 class WorkerClient(object):
-    def __init__(self, python=None, script=WORKER_SCRIPT, base=None, idle=IDLE_SECONDS,
-                 fake=False):
+    def __init__(self, python=None, script=WORKER_SCRIPT, base=None, idle=None, fake=False):
         self.base = base or root()
         self.python = python or env_python(self.base)
         self.script = script
-        self.idle = idle
+        self.idle = idle          # seconds; None = the user's setting when the helper starts
         self.fake = fake
         self.proc = None
         self._send_lock = threading.Lock()
@@ -207,6 +205,7 @@ class WorkerClient(object):
         self._ids = itertools.count(1)
         self._hello = threading.Event()
         self._log_fh = None
+        self._loaded_proc = None  # the helper process that has the model in memory
 
     # -- lifecycle --------------------------------------------------------------
     def log_path(self):
@@ -214,6 +213,15 @@ class WorkerClient(object):
 
     def is_running(self):
         return self.proc is not None and self.proc.poll() is None
+
+    def is_loaded(self):
+        """True while the running helper has finished loading the model."""
+        proc = self.proc
+        return proc is not None and proc is self._loaded_proc and proc.poll() is None
+
+    def is_busy(self):
+        """True while any request (load, generate...) is waiting for the helper."""
+        return bool(self._pending)
 
     def start(self):
         with self._start_lock:
@@ -228,7 +236,8 @@ class WorkerClient(object):
             if os.path.exists(path) and os.path.getsize(path) > 5 * 1024 * 1024:
                 os.replace(path, path + ".old")
             self._log_fh = open(path, "ab")
-            cmd = [self.python, "-u", self.script, "--root", self.base, "--idle", str(self.idle)]
+            idle = self.idle if self.idle is not None else idle_seconds()
+            cmd = [self.python, "-u", self.script, "--root", self.base, "--idle", str(idle)]
             if self.fake:
                 cmd.append("--fake")
             self._hello.clear()
@@ -311,8 +320,12 @@ class WorkerClient(object):
     def request(self, cmd, payload=None, progress=None, cancelled=None, timeout=None,
                 on_result=None):
         """Send a command and wait for its final event. Returns the 'done' message.
-        ``on_result(event)`` is called for each "result" event (a finished variation)."""
+        ``on_result(event)`` is called for each "result" event (a finished variation).
+
+        Requests can come from several threads (a warm-up and a Generate): the helper
+        runs them one at a time in the order they arrive."""
         self.start()
+        proc = self.proc
         rid = "r%d" % next(self._ids)
         q = queue.Queue()
         self._pending[rid] = q
@@ -350,6 +363,8 @@ class WorkerClient(object):
                     if on_result:
                         on_result(ev)
                 elif kind in ("done", "pong"):
+                    if kind == "done" and cmd in ("load", "generate", "selftest"):
+                        self._loaded_proc = proc
                     return ev
                 elif kind == "error":
                     raise WorkerError(ev.get("message", "Unknown error"), oom=ev.get("oom", False),

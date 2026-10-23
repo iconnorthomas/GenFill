@@ -64,7 +64,8 @@ class LocalAIDialog(QtWidgets.QDialog):
         intro = QtWidgets.QLabel(
             "Free, offline Generative Fill on your own GPU, with no tokens or accounts. Installs "
             "a fill model and LaMa (object removal) into a private folder. The AI runs in a "
-            "hidden helper that only starts when you click Generate and exits with Nuke.")
+            "hidden helper that starts loading when a GenerativeFill node uses it and exits "
+            "with Nuke.")
         intro.setWordWrap(True)
         intro.setObjectName("gfMuted")
         lay.addWidget(intro)
@@ -93,6 +94,27 @@ class LocalAIDialog(QtWidgets.QDialog):
         form.addRow(self.size_label, self.size_combo)
         self.space_label = QtWidgets.QLabel("")
         form.addRow("Disk", self.space_label)
+        keep = QtWidgets.QHBoxLayout()
+        self.idle_combo = QtWidgets.QComboBox()
+        self.idle_combo.setObjectName("gfModel")
+        for minutes in self._localai.IDLE_CHOICES:
+            self.idle_combo.addItem(_idle_label(minutes), minutes)
+        current = self._localai.idle_minutes()
+        if self.idle_combo.findData(current) < 0:
+            self.idle_combo.addItem(_idle_label(current), current)
+        self.idle_combo.setCurrentIndex(self.idle_combo.findData(current))
+        self.idle_combo.setToolTip(
+            "How long the AI stays loaded on the GPU with nothing to do. Loading it again takes "
+            "30-60 s. Applies the next time the helper starts.")
+        self.idle_combo.currentIndexChanged.connect(self._idle_changed)
+        keep.addWidget(self.idle_combo)
+        self.stop_btn = QtWidgets.QPushButton("Stop AI Helper")
+        self.stop_btn.setToolTip("Unload the AI now to free GPU memory. It loads again when "
+                                 "needed.")
+        self.stop_btn.clicked.connect(self._stop_helper)
+        keep.addWidget(self.stop_btn)
+        keep.addStretch(1)
+        form.addRow("Keep loaded", keep)
         lay.addLayout(form)
 
         self.license_label = QtWidgets.QLabel("")
@@ -253,6 +275,16 @@ class LocalAIDialog(QtWidgets.QDialog):
         self.cancel_btn.setEnabled(True)
         self.thread.start()
 
+    def _idle_changed(self, *args):
+        minutes = self.idle_combo.currentData()
+        if minutes is not None and minutes != self._localai.idle_minutes():
+            self._localai.set_idle_minutes(minutes)
+
+    def _stop_helper(self):
+        from ..localai import client
+        client.stop_helper()
+        self.status.setText("AI helper stopped; GPU memory is free.")
+
     def _cancel(self):
         if self.installer:
             self.installer.cancel()
@@ -307,6 +339,15 @@ class LocalAIDialog(QtWidgets.QDialog):
             if not self.isVisible():
                 self.show()
                 self.raise_()
+
+
+def _idle_label(minutes):
+    if not minutes:
+        return "Until Nuke closes"
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return "%d hour%s idle" % (hours, "" if hours == 1 else "s")
+    return "%d minutes idle" % minutes
 
 
 def show():

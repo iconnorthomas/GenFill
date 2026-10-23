@@ -15,7 +15,9 @@ Protocol: one JSON object per line.
 Everything else the libraries print goes to stderr (Nuke points it at a log).
 
 The process exits when Nuke closes the pipe (Nuke quit or crashed), on
-"shutdown", or after ``--idle`` seconds without work (frees the GPU).
+"shutdown", or after ``--idle`` seconds without work (frees the GPU; 0 = never).
+Commands run one at a time in arrival order; "cancel" also works on a command
+still waiting its turn (e.g. a generate queued behind a warm-up "load").
 """
 from __future__ import annotations
 
@@ -481,6 +483,9 @@ class FakeEngine(object):
         return {"fake": True, "gpu": "FakeGPU", "loaded": self.loaded}
 
     def load(self, job=None):
+        if not self.loaded:
+            # Tests set this to stand in for FLUX's 30-60 s load.
+            time.sleep(float(os.environ.get("GENFILL_FAKE_LOAD_SECONDS") or 0))
         self.loaded = True
 
     def generate(self, job):
@@ -556,6 +561,8 @@ def main(argv=None):
     engine = FakeEngine(args.root) if args.fake else Engine(args.root)
     jobs = queue.Queue()
     current = [None]
+    cancelled_ids = set()     # cancel arrived while the command was still queued
+    cancel_lock = threading.Lock()
 
     def reader():
         for raw in sys.stdin:
@@ -568,9 +575,12 @@ def main(argv=None):
                 log("bad message: %r", raw[:200])
                 continue
             if msg.get("cmd") == "cancel":
-                job = current[0]
-                if job is not None and (msg.get("target") in (None, job.id)):
-                    job.cancel.set()
+                with cancel_lock:
+                    job = current[0]
+                    if job is not None and (msg.get("target") in (None, job.id)):
+                        job.cancel.set()
+                    elif msg.get("target"):
+                        cancelled_ids.add(msg["target"])
                 continue
             jobs.put(msg)
         # Nuke closed the pipe (quit or crashed): stop any running job and exit.
@@ -591,7 +601,7 @@ def main(argv=None):
 
     while True:
         try:
-            msg = jobs.get(timeout=args.idle)
+            msg = jobs.get(timeout=args.idle if args.idle > 0 else None)
         except queue.Empty:
             log("idle for %ss, exiting to free GPU memory", args.idle)
             send({"event": "bye", "reason": "idle"})
@@ -601,7 +611,14 @@ def main(argv=None):
             return 0
         cmd = msg.get("cmd")
         job = Job(msg)
-        current[0] = job
+        with cancel_lock:
+            current[0] = job
+            skip = job.id in cancelled_ids
+            cancelled_ids.discard(job.id)
+        if skip:
+            current[0] = None
+            send({"id": job.id, "event": "error", "cancelled": True, "message": "Cancelled."})
+            continue
         try:
             if cmd == "shutdown":
                 send({"id": job.id, "event": "bye", "reason": "shutdown"})

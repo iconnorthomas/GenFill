@@ -210,6 +210,14 @@ FLUX_CONFIGS = {
 }
 
 
+_active = set()      # installers running in this process
+
+
+def is_running():
+    """True while an install / repair runs in this process (the warm-up waits for it)."""
+    return bool(_active)
+
+
 def _sleep(seconds):
     """Backoff between download retries (patched out in tests)."""
     time.sleep(seconds)
@@ -818,6 +826,13 @@ class Installer(object):
 
     # -- run ---------------------------------------------------------------
     def run(self):
+        _active.add(self)
+        try:
+            return self._run()
+        finally:
+            _active.discard(self)
+
+    def _run(self):
         os.makedirs(log_dir(self.base), exist_ok=True)
         self._log_fh = open(os.path.join(log_dir(self.base), "install.log"), "a", encoding="utf-8")
         self.log("==== GenFill Local AI install %s -> %s" % (time.strftime("%Y-%m-%d %H:%M"), self.base))

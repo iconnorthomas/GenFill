@@ -37,6 +37,37 @@ def root():
     return (config.load().get("local_ai", {}) or {}).get("root") or default_root()
 
 
+# How long the helper keeps the model loaded with nothing to do before it exits to
+# free the GPU. 0 = until Nuke closes. Loading it again takes 30-60 s, so the
+# default is generous; "Stop AI Helper" frees the GPU right away.
+IDLE_MINUTES_DEFAULT = 30
+IDLE_CHOICES = (10, 30, 60, 120, 0)
+
+
+def idle_minutes():
+    section = config.load().get("local_ai")
+    value = section.get("idle_minutes", IDLE_MINUTES_DEFAULT) if isinstance(section, dict)         else IDLE_MINUTES_DEFAULT
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return IDLE_MINUTES_DEFAULT
+    return value if value >= 0 else IDLE_MINUTES_DEFAULT
+
+
+def set_idle_minutes(minutes):
+    data = config.load()
+    section = data.get("local_ai")
+    if not isinstance(section, dict):
+        section = data["local_ai"] = {}
+    section["idle_minutes"] = int(minutes)
+    config.save(data)
+
+
+def idle_seconds():
+    """The helper's --idle value; 0 means never exit while Nuke is open."""
+    return idle_minutes() * 60
+
+
 def env_python(base=None):
     base = base or root()
     if sys.platform.startswith("win"):

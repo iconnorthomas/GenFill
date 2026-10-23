@@ -12,9 +12,9 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "nuke", "python"))
 
-from genfill import localai, pngio  # noqa: E402
+from genfill import config, localai, pngio  # noqa: E402
 from genfill.backends import base, local  # noqa: E402
-from genfill.localai import client as lclient  # noqa: E402
+from genfill.localai import client as lclient, installer, warmup  # noqa: E402
 
 
 class HelperTests(unittest.TestCase):
@@ -250,6 +250,151 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(localai.is_installed(self.tmp))
         os.remove(os.path.join(self.tmp, "models/lama/big-lama.pt"))
         self.assertFalse(localai.is_installed(self.tmp))
+
+
+class WarmupTests(unittest.TestCase):
+    """Loading the model in the background before the first Generate (localai/warmup.py)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.img = os.path.join(self.tmp, "src.png")
+        pngio.write(self.img, pngio.Image(32, 32, 3))
+        self.client = lclient.WorkerClient(python=sys.executable, base=self.tmp, fake=True, idle=30)
+        patches = [mock.patch.object(localai, "is_installed", return_value=True),
+                   mock.patch.object(lclient, "get_client", return_value=self.client),
+                   mock.patch.dict(os.environ, {"GENFILL_FAKE_LOAD_SECONDS": "1.5"})]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def tearDown(self):
+        self._join()
+        self.client.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _join(self):
+        t = warmup._thread[0]
+        if t is not None:
+            t.join(30)
+
+    def test_loads_once_in_the_background(self):
+        t0 = time.time()
+        self.assertTrue(warmup.start("test"))
+        self.assertLess(time.time() - t0, 1.0)          # never waits for the helper
+        self.assertTrue(warmup.is_warming())
+        self.assertFalse(warmup.start("again"))         # already warming
+        self._join()
+        self.assertFalse(warmup.is_warming())
+        self.assertTrue(self.client.is_loaded())
+        self.assertFalse(warmup.start("loaded"))        # nothing left to do
+        self.client.stop()
+        self.assertFalse(self.client.is_loaded())       # a new helper has to load again
+        self.assertTrue(warmup.start("after stop"))
+
+    def test_not_installed_or_installing(self):
+        with mock.patch.object(localai, "is_installed", return_value=False):
+            self.assertFalse(warmup.start("test"))
+        with mock.patch.object(installer, "is_running", return_value=True):
+            self.assertFalse(warmup.start("test"))
+        self.assertFalse(warmup.is_warming())
+        self.assertIsNone(self.client.proc)             # the helper wasn't even started
+
+    def test_skips_while_helper_is_busy(self):
+        with mock.patch.object(self.client, "is_busy", return_value=True):
+            self.assertFalse(warmup.start("test"))
+
+    def test_failure_is_logged_not_raised(self):
+        broken = lclient.WorkerClient(python=os.path.join(self.tmp, "missing.exe"), base=self.tmp)
+        with mock.patch.object(lclient, "get_client", return_value=broken):
+            self.assertTrue(warmup.start("test"))
+            self._join()
+        self.assertFalse(broken.is_loaded())
+
+    def test_generate_during_warm_up_uses_the_same_helper(self):
+        self.assertTrue(warmup.start("test"))
+        while self.client.proc is None:
+            time.sleep(0.02)
+        pid = self.client.proc.pid
+        messages = []
+        req = base.GenerationRequest(self.img, self.img, self.img, "a cat", 32, 32, seed=1,
+                                     count=2)
+        out = local.LocalBackend().generate(req, "", progress=lambda f, m: messages.append(m))
+        self.assertEqual(len(out), 2)
+        self.assertEqual(messages[0], "Waiting for the local AI to finish loading...")
+        self.assertEqual(self.client.proc.pid, pid)
+        self._join()
+        self.assertTrue(self.client.is_loaded())
+
+    def test_cancel_reaches_a_generate_queued_behind_the_load(self):
+        self.assertTrue(warmup.start("test"))
+        t0 = time.time()
+        while not self.client.is_busy():               # the load is on its way to the helper
+            time.sleep(0.02)
+        time.sleep(0.2)
+        payload = {"image": self.img, "mask": self.img, "prompt": "x", "width": 32, "height": 32,
+                   "count": 1, "steps": 2, "out_dir": os.path.join(self.tmp, "out")}
+        with self.assertRaises(lclient.WorkerError) as ctx:
+            self.client.request("generate", payload, cancelled=lambda: True)
+        self.assertTrue(ctx.exception.cancelled)
+        self.assertFalse(os.path.isdir(payload["out_dir"]))   # it never ran
+        self._join()
+        self.assertTrue(self.client.is_loaded())                # the load itself carried on
+        self.assertGreater(time.time() - t0, 1.0)
+
+
+class IdleSettingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        cfg = os.path.join(self.tmp, "cfg")
+        for p in (mock.patch.object(config, "CONFIG_DIR", cfg),
+                  mock.patch.object(config, "CONFIG_PATH", os.path.join(cfg, "config.json"))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_default_and_saved(self):
+        self.assertEqual(localai.idle_minutes(), 30)
+        self.assertEqual(localai.idle_seconds(), 1800)
+        localai.set_idle_minutes(120)
+        self.assertEqual(localai.idle_minutes(), 120)
+        self.assertEqual(config.load()["local_ai"], {"idle_minutes": 120})
+        localai.set_idle_minutes(0)
+        self.assertEqual(localai.idle_seconds(), 0)
+        for bad in ("soon", -5, None, [1]):
+            config.save({"local_ai": {"idle_minutes": bad}})
+            self.assertEqual(localai.idle_minutes(), 30, bad)
+        config.save({"local_ai": "broken"})
+        self.assertEqual(localai.idle_minutes(), 30)
+
+    def test_setting_keeps_other_local_ai_settings(self):
+        config.save({"local_ai": {"root": "D:/AI"}, "api_keys": {"x": "y"}})
+        localai.set_idle_minutes(60)
+        data = config.load()
+        self.assertEqual(data["local_ai"], {"root": "D:/AI", "idle_minutes": 60})
+        self.assertEqual(data["api_keys"], {"x": "y"})
+
+    def test_setting_is_passed_to_the_helper(self):
+        localai.set_idle_minutes(45)
+        c = lclient.WorkerClient(python=sys.executable, base=self.tmp, fake=True)
+        try:
+            c.request("ping")
+            self.assertEqual(c.proc.args[c.proc.args.index("--idle") + 1], "2700")
+            self.assertIn("idle timeout 2700.0s", lclient.helper_log_tail(self.tmp))
+        finally:
+            c.stop()
+
+    def test_until_nuke_closes(self):
+        localai.set_idle_minutes(0)
+        c = lclient.WorkerClient(python=sys.executable, base=self.tmp, fake=True)
+        try:
+            c.request("ping")
+            time.sleep(0.5)
+            self.assertTrue(c.is_running())            # 0 isn't "exit at once"
+            self.assertEqual(c.request("ping")["event"], "pong")
+        finally:
+            c.stop()
 
 
 if __name__ == "__main__":
