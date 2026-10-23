@@ -1,0 +1,36 @@
+# Runs GenFill's unit tests on every pull request and on pushes to main.
+# The tests use only the standard library plus a fake `nuke` module (tests/fake_nuke.py),
+# so no Nuke license, GPU or extra packages are needed.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Nuke 14 ships Python 3.9, Nuke 15 ships 3.10, Nuke 16 and 17 ship 3.11.
+        os: [windows-latest]
+        python: ["3.9", "3.10", "3.11"]
+        include:
+          # GenFill also loads on Linux via NUKE_PATH.
+          - os: ubuntu-latest
+            python: "3.11"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
