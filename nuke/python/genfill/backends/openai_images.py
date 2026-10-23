@@ -45,7 +45,8 @@ class OpenAIBackend(Backend):
         return region.scale_to_pixel_budget(width, height, 1536 * 1024, 16, min_side=256,
                                             max_side=2560, max_aspect=3.0)
 
-    def generate(self, request, api_key, progress=None, cancelled=None):
+    def generate(self, request, api_key, progress=None, cancelled=None, on_image=None):
+        # One request returns every variation at once, so there's nothing to stream.
         if not api_key:
             raise BackendError("No OpenAI API key set (OPENAI_API_KEY or API Keys...).")
         if cancelled and cancelled():

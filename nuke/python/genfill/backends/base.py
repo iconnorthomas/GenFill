@@ -65,8 +65,12 @@ class Backend(object):
         """Resolution to send for a crop of ``width`` x ``height``."""
         raise NotImplementedError
 
-    def generate(self, request, api_key, progress=None, cancelled=None):
-        """Return a list of PNG bytes, one per variation."""
+    def generate(self, request, api_key, progress=None, cancelled=None, on_image=None):
+        """Return a list of PNG bytes, one per variation.
+
+        Backends that make variations one at a time also call ``on_image(index, item)``
+        as each is finished (``item`` as in the returned list), so it can be shown
+        straight away. Others may ignore it: the returned list is always complete."""
         raise NotImplementedError
 
 

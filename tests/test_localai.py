@@ -174,6 +174,27 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(data.startswith(b"\x89PNG"))
         self.assertTrue(preview.startswith(b"\x89PNG"))
 
+    def test_local_backend_streams_each_variation(self):
+        req = base.GenerationRequest(self.img, self.mask, self.mask, "", 32, 32, seed=1, count=3)
+        events = []
+
+        def progress(frac, msg):
+            events.append("progress")
+
+        def on_image(i, item):
+            events.append(("image", i))
+            self.assertTrue(item[0].startswith(b"\x89PNG"))
+
+        with mock.patch.object(localai, "is_installed", return_value=True), \
+                mock.patch.object(lclient, "get_client", return_value=self.client):
+            out = local.LocalBackend().generate(req, "", progress=progress, on_image=on_image)
+        images = [e for e in events if e != "progress"]
+        self.assertEqual(images, [("image", 0), ("image", 1), ("image", 2)])
+        self.assertEqual(len(out), 3)
+        # Variation 1 arrives before variation 2 has started its progress steps.
+        first = events.index(("image", 0))
+        self.assertIn("progress", events[first + 1:events.index(("image", 1))])
+
     def test_local_backend_not_installed(self):
         req = base.GenerationRequest(self.img, self.mask, self.mask, "x", 32, 32)
         with mock.patch.object(localai, "is_installed", return_value=False):

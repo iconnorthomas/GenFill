@@ -131,7 +131,7 @@ class MockBackend(Backend):
     def model_size(self, width, height, model=""):
         return region.scale_to_pixel_budget(width, height, 384 * 384, 8, min_side=64)
 
-    def generate(self, request, api_key, progress=None, cancelled=None):
+    def generate(self, request, api_key, progress=None, cancelled=None, on_image=None):
         img = pngio.read(request.image_path)
         mask = pngio.read(request.mask_path)
         aspect = img.width / float(img.height)
@@ -147,5 +147,7 @@ class MockBackend(Backend):
                 progress(float(i) / request.count,
                          "Preview variation %d of %d..." % (i + 1, request.count))
             out.append(render_variation(img, mask, cells, gw, gh, seed + i))
+            if on_image:
+                on_image(i, out[-1])
             time.sleep(0.05)
         return out

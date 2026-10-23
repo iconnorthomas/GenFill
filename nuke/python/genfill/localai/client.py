@@ -308,8 +308,10 @@ class WorkerClient(object):
         for q in list(self._pending.values()):
             q.put({"event": "exited"})
 
-    def request(self, cmd, payload=None, progress=None, cancelled=None, timeout=None):
-        """Send a command and wait for its final event. Returns the 'done' message."""
+    def request(self, cmd, payload=None, progress=None, cancelled=None, timeout=None,
+                on_result=None):
+        """Send a command and wait for its final event. Returns the 'done' message.
+        ``on_result(event)`` is called for each "result" event (a finished variation)."""
         self.start()
         rid = "r%d" % next(self._ids)
         q = queue.Queue()
@@ -344,6 +346,9 @@ class WorkerClient(object):
                 if kind == "progress":
                     if progress:
                         progress(ev.get("fraction", 0.0), ev.get("message", ""))
+                elif kind == "result":
+                    if on_result:
+                        on_result(ev)
                 elif kind in ("done", "pong"):
                     return ev
                 elif kind == "error":

@@ -31,7 +31,7 @@ class StabilityBackend(Backend):
         return region.scale_to_pixel_budget(width, height, 1024 * 1024, 64,
                                             min_side=256, max_aspect=2.5)
 
-    def generate(self, request, api_key, progress=None, cancelled=None):
+    def generate(self, request, api_key, progress=None, cancelled=None, on_image=None):
         if not api_key:
             raise BackendError("No Stability API key set (STABILITY_API_KEY or API Keys...).")
         image = request.read("image_path")
@@ -73,4 +73,6 @@ class StabilityBackend(Backend):
                 raise BackendError("Stability's content filter blocked this result. "
                                    "Try a different prompt.")
             results.append(data)
+            if on_image:
+                on_image(i, data)
         return results

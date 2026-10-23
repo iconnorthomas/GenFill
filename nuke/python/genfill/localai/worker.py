@@ -8,7 +8,10 @@ Nuke's process. If it crashes or runs out of GPU memory, Nuke keeps running.
 Protocol: one JSON object per line.
   stdin  (from Nuke):  {"id": "...", "cmd": "ping" | "load" | "generate" | "selftest"
                         | "cancel" | "shutdown", ...}
-  stdout (to Nuke):    {"id": "...", "event": "progress" | "done" | "error" | "pong" | "bye", ...}
+  stdout (to Nuke):    {"id": "...", "event": "progress" | "result" | "done" | "error" | "pong"
+                        | "bye", ...}
+  "result" ({"index": i, "file": path}) is sent as each variation is saved, before "done"
+  lists them all; older Nuke-side code just ignores it.
 Everything else the libraries print goes to stderr (Nuke points it at a log).
 
 The process exits when Nuke closes the pipe (Nuke quit or crashed), on
@@ -142,6 +145,9 @@ class Job(object):
 
     def progress(self, fraction, message):
         send({"id": self.id, "event": "progress", "fraction": float(fraction), "message": message})
+
+    def result(self, index, path):
+        send({"id": self.id, "event": "result", "index": int(index), "file": path})
 
     def check(self):
         if self.cancel.is_set():
@@ -429,6 +435,7 @@ class Engine(object):
                 preview_png(os.path.join(m["out_dir"], "local_%02d_preview.png" % (i + 1)),
                             result, preview_kind)
                 outputs.append(path)
+                job.result(i, path)
             return outputs
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
@@ -496,6 +503,7 @@ class FakeEngine(object):
             shutil.copyfile(m["image"], path)
             shutil.copyfile(m["image"], os.path.join(m["out_dir"], "local_%02d_preview.png" % (i + 1)))
             out.append(path)
+            job.result(i, path)
         return out
 
     def selftest(self, job):
