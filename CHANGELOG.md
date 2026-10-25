@@ -11,6 +11,8 @@
   available as **Text encoder: Maximum** in the Local AI dialog. Existing installs keep their
   16-bit files until you choose otherwise, and the two never share prompt-cache entries.
 
+## 0.9.2 - 2026-10-25
+
 - **Local AI: "Reading the prompt..." takes about 2 seconds instead of 1 to 3 minutes.** The
   text encoder (T5 for FLUX.1 Fill, Qwen3 for FLUX.2 [klein]) is too big to share a 12 GB GPU
   with the image model, so for every new prompt the image model was moved off the GPU, the
