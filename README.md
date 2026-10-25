@@ -35,6 +35,7 @@ Latest version: see [**Releases**](https://github.com/iconnorthomas/GenFill/rele
 - [Color science: a linear pipeline with display-referred models](#color-science-a-linear-pipeline-with-display-referred-models)
 - [Privacy and security](#privacy-and-security)
 - [Troubleshooting](#troubleshooting)
+- [Getting help](#getting-help)
 - [Roadmap](#roadmap)
 - [Development](#development)
 - [Licenses](#licenses)
@@ -494,7 +495,32 @@ rules allow it.
 | Bright highlights flatten inside the fill | Display transform ceiling; use *Log (ACEScct)* for that shot |
 | "10-node limit for Node objects accessible in Python", or a blank Group (Nuke Indie / Non-commercial) | Update GenFill to 0.9.0 or later (see [Nuke Indie](#1-the-plugin)) |
 
-Send `test_output\genfill.log` and the helper log with any bug report.
+Send the GenFill log and the helper log with any bug report (see [Getting help](#getting-help)).
+
+---
+
+## Getting help
+
+- **Questions and setup help:** ask in [**Discussions > Q&A**](https://github.com/iconnorthomas/GenFill/discussions/categories/q-a).
+  When a reply solves it, mark it as the answer so the next person finds it.
+- **Ideas and feature requests:** [Discussions > Ideas](https://github.com/iconnorthomas/GenFill/discussions/categories/ideas).
+- **Show what you made:** [Discussions > Show and tell](https://github.com/iconnorthomas/GenFill/discussions/categories/show-and-tell).
+- **Bugs:** open an [Issue](https://github.com/iconnorthomas/GenFill/issues).
+
+Please include:
+
+- your GenFill version (**GenFill > Developer > Build Info**)
+- your Nuke version and license (commercial, Indie or Non-commercial)
+- your OS and GPU
+- which model you used
+- the last lines of the GenFill log, and for Local AI problems the helper log:
+
+| Log | Where |
+|---|---|
+| GenFill log | `~/.nuke/genfill/genfill.log` (`test_output\genfill.log` when running from a repo checkout) |
+| Helper log | `GenFill-LocalAI\logs\helper.log` in your Local AI folder |
+
+Don't post API keys, or plates you aren't allowed to share. The GenFill log contains your prompts.
 
 ---
 
