@@ -92,6 +92,22 @@ class LocalAIDialog(QtWidgets.QDialog):
         self.size_combo.currentIndexChanged.connect(self._refresh_space)
         self.size_label = QtWidgets.QLabel("Model size")
         form.addRow(self.size_label, self.size_combo)
+        self.t5_combo = QtWidgets.QComboBox()
+        self.t5_combo.setObjectName("gfModel")
+        for tid, (label, _gb) in getattr(self._inst_mod, "T5_VARIANTS", {}).items():
+            self.t5_combo.addItem(label, tid)
+        current_t5 = (self._localai.manifest() or {}).get("t5")
+        if current_t5 is None and self._localai.manifest():
+            current_t5 = "bf16"           # installed before the choice existed
+        idx = self.t5_combo.findData(current_t5 or getattr(self._inst_mod, "DEFAULT_T5", None))
+        self.t5_combo.setCurrentIndex(max(0, idx))
+        self.t5_combo.setToolTip(
+            "The text encoder that reads your prompt. 8-bit is half the download and disk "
+            "space and reads faster from a hard disk; in side-by-side tests its fills looked "
+            "the same as 16-bit. Both use about 9.5 GB of RAM once loaded.")
+        self.t5_combo.currentIndexChanged.connect(self._refresh_space)
+        self.t5_label = QtWidgets.QLabel("Text encoder")
+        form.addRow(self.t5_label, self.t5_combo)
         self.space_label = QtWidgets.QLabel("")
         form.addRow("Disk", self.space_label)
         keep = QtWidgets.QHBoxLayout()
@@ -186,6 +202,8 @@ class LocalAIDialog(QtWidgets.QDialog):
         flux1 = self._family() == self._inst_mod.FLUX1
         self.size_combo.setVisible(flux1)
         self.size_label.setVisible(flux1)
+        self.t5_combo.setVisible(flux1 and self.t5_combo.count() > 0)
+        self.t5_label.setVisible(flux1 and self.t5_combo.count() > 0)
         self.license_label.setText('%s License: <a href="%s" style="color:#8fa6ff">%s</a>.'
                                    % (fam["summary"], fam["license_url"], fam["license"]))
         if self.thread is None or not self.thread.is_alive():
@@ -248,7 +266,12 @@ class LocalAIDialog(QtWidgets.QDialog):
             probe = os.path.dirname(probe)
         free = shutil.disk_usage(probe or os.path.expanduser("~")).free / 1e9
         self.space_label.setText("about %.0f GB needed, %.0f GB free"
-                                 % (self._inst_mod.estimate_gb(q, self._family()), free))
+                                 % (self._inst_mod.estimate_gb(q, self._family(), **self._t5_kw()),
+                                    free))
+
+    def _t5_kw(self):
+        t5 = self.t5_combo.currentData() if self.t5_combo.count() else None
+        return {"t5": t5} if t5 else {}
 
     # -- actions ---------------------------------------------------------------
     def _start(self):
@@ -266,11 +289,13 @@ class LocalAIDialog(QtWidgets.QDialog):
         client.stop_helper()   # files may be replaced
         self.installer = self._inst_mod.Installer(
             base=self._localai.root(), quant=self.size_combo.currentData(),
-            family=self._family(), on_event=lambda kind, **kw: self.emitter.event.emit(kind, kw))
+            family=self._family(), on_event=lambda kind, **kw: self.emitter.event.emit(kind, kw),
+            **self._t5_kw())
         self.thread = threading.Thread(target=self.installer.run, name="GenFill-install",
                                        daemon=True)
         self.install_btn.setEnabled(False)
         self.size_combo.setEnabled(False)
+        self.t5_combo.setEnabled(False)
         self.family_combo.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.thread.start()
@@ -333,6 +358,7 @@ class LocalAIDialog(QtWidgets.QDialog):
                 self.details_btn.setChecked(True)
             self.install_btn.setEnabled(True)
             self.size_combo.setEnabled(True)
+            self.t5_combo.setEnabled(True)
             self.family_combo.setEnabled(True)
             self.cancel_btn.setEnabled(False)
             self.install_btn.setText(self._install_text())

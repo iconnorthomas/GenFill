@@ -90,11 +90,28 @@ QUANTS = {
     "Q8_0": ("Maximum: full quality, for 24 GB GPUs (12.7 GB model)", 12.7, 20),
 }
 
+# T5 text encoder for FLUX.1 Fill. 8-bit by default: on an RTX 3080 Ti, with the same
+# seed, its fills looked the same as 16-bit (0.5-2.6/255 mean difference inside the
+# fill, PSNR 34-48 dB). It's half the download and disk space, and reads faster from a
+# hard disk (59 s vs 96 s cold). Once loaded it's unpacked to 16-bit, so it uses the
+# same RAM (~9.7 GB), and unpacking costs ~30 s of CPU: from Windows' file cache or a
+# fast SSD the 16-bit file can load sooner.
+T5_VARIANTS = {
+    # id: (label, file size GB)
+    "q8": ("Standard: 8-bit (5.1 GB), half the download, faster from a hard disk", 5.06),
+    "bf16": ("Maximum: 16-bit (9.5 GB), the reference encoder", 9.5),
+}
+DEFAULT_T5 = "q8"
+T5_GGUF_REPO = "city96/t5-v1_1-xxl-encoder-gguf"
+T5_GGUF_FILE = "t5-v1_1-xxl-encoder-Q8_0.gguf"
+T5_GGUF_PATH = "models/t5-gguf/" + T5_GGUF_FILE
+
 # Hugging Face downloads are pinned to a commit so the SHA-256 values below
 # (the LFS sha256 Hugging Face publishes on each file page) can't drift.
 HF_REVISIONS = {
     "YarvixPA/FLUX.1-Fill-dev-GGUF": "78b83f1da140a4dcd6466580516544e1f6effe3e",
     "city96/t5-v1_1-xxl-encoder-bf16": "1b9c856aadb864af93c1dcdc226c2774fa67bc86",
+    T5_GGUF_REPO: "005a6ea51a7d0b84d677b3e633bb52a8c85a83d9",
     "openai/clip-vit-large-patch14": "32bd64288804d66eefd0ccbe215aa642df71cc41",
     "Comfy-Org/Lumina_Image_2.0_Repackaged": "5b072540ef86570fecb8249c505f23d5bdeb88cd",
     KLEIN_REPO: "e7b7dc27f91deacad38e78976d1f2b499d76a294",
@@ -151,19 +168,19 @@ def recommended_quant(vram_gb):
     return "Q8_0"
 
 
-def model_files(quant, family=FLUX1):
+def model_files(quant, family=FLUX1, t5=DEFAULT_T5):
     """(relative path, url, approx GB, SHA-256 or None) for every model file."""
     if family == KLEIN:
         return [("%s/%s" % (KLEIN_DIR, path), hf_url(KLEIN_REPO, path), gb, sha)
                 for path, gb, sha in KLEIN_FILES] + [LAMA_FILE]
-    t5, clip = "city96/t5-v1_1-xxl-encoder-bf16", "openai/clip-vit-large-patch14"
+    if t5 not in T5_VARIANTS:
+        raise ValueError("unknown T5 variant %r" % t5)
+    t5_repo, clip = "city96/t5-v1_1-xxl-encoder-bf16", "openai/clip-vit-large-patch14"
     files = [
         ("models/flux/flux1-fill-dev-%s.gguf" % quant,
          hf_url("YarvixPA/FLUX.1-Fill-dev-GGUF", "flux1-fill-dev-%s.gguf" % quant),
          QUANTS[quant][1], FLUX_SHA256[quant]),
-        ("models/t5/model.safetensors", hf_url(t5, "model.safetensors"), 9.5,
-         "565cb2487351282e8e4dbeb88e63f4ad28217ce0439f5a8e6525a924807d2d9b"),
-        ("models/t5/spiece.model", hf_url(t5, "spiece.model"), 0.0,
+        ("models/t5/spiece.model", hf_url(t5_repo, "spiece.model"), 0.0,
          "d60acb128cf7b7f2536e8f38a5b18a05535c9e14c7a355904270e15b0945ea86"),
         ("models/clip/model.safetensors", hf_url(clip, "model.safetensors"), 1.7,
          "a2bf730a0c7debf160f7a6b50b3aaf3703e7e88ac73de7a314903141db026dcb"),
@@ -172,10 +189,18 @@ def model_files(quant, family=FLUX1):
          "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38"),
         LAMA_FILE,
     ]
+    if t5 == "bf16":
+        files.append(("models/t5/model.safetensors", hf_url(t5_repo, "model.safetensors"), 9.5,
+                      "565cb2487351282e8e4dbeb88e63f4ad28217ce0439f5a8e6525a924807d2d9b"))
+    else:
+        files.append((T5_GGUF_PATH, hf_url(T5_GGUF_REPO, T5_GGUF_FILE), T5_VARIANTS["q8"][1],
+                      "9ec60f6028534b7fe5af439fcb535d75a68592a9ca3fcdeb175ef89e3ee99825"))
     # Small tokenizer/config files are plain git files on Hugging Face, which
     # publishes no SHA-256 for them; the pinned commit in the URL fixes their content.
     for name in ("config.json", "special_tokens_map.json", "tokenizer_config.json"):
-        files.append(("models/t5/" + name, hf_url(t5, name), 0.0, None))
+        # config.json is needed for the 8-bit file too: its own metadata makes
+        # transformers build T5 v1.0 (ReLU) instead of v1.1 (gated-GELU).
+        files.append(("models/t5/" + name, hf_url(t5_repo, name), 0.0, None))
     for name in ("config.json", "merges.txt", "vocab.json", "tokenizer.json", "tokenizer_config.json",
                  "special_tokens_map.json"):
         files.append(("models/clip/" + name, hf_url(clip, name), 0.0, None))
@@ -352,8 +377,8 @@ def version_tuple(text):
         return None
 
 
-def estimate_gb(quant, family=FLUX1):
-    return sum(f[2] for f in model_files(quant, family)) + 7.0   # + PyTorch environment
+def estimate_gb(quant, family=FLUX1, t5=DEFAULT_T5):
+    return sum(f[2] for f in model_files(quant, family, t5)) + 7.0   # + PyTorch environment
 
 
 class Installer(object):
@@ -377,12 +402,16 @@ class Installer(object):
         return [(k, "Download FLUX.2 [klein] 4B, its text encoder and LaMa" if k == "models" else l)
                 for k, l in cls.STEPS]
 
-    def __init__(self, base=None, quant=None, on_event=None, platform=None, family=FLUX1):
+    def __init__(self, base=None, quant=None, on_event=None, platform=None, family=FLUX1,
+                 t5=None):
         if family not in FAMILIES:
             raise ValueError("unknown Local AI model %r" % family)
+        if t5 is not None and t5 not in T5_VARIANTS:
+            raise ValueError("unknown T5 variant %r" % t5)
         self.base = base or default_root()
         self.quant = quant
         self.family = family
+        self.t5 = t5 or DEFAULT_T5
         self.steps = self.steps_for(family)
         self.on_event = on_event or (lambda kind, **kw: None)
         self.platform = platform or sys.platform
@@ -548,7 +577,8 @@ class Installer(object):
             self.log("model: %s (%s)" % (FAMILIES[KLEIN]["label"], FAMILIES[KLEIN]["license"]))
         else:
             self.log("model size: %s (%s)" % (self.quant, QUANTS[self.quant][0]))
-        need = sum(f[2] for f in model_files(self.quant, self.family)
+            self.log("text encoder: %s (%s)" % (self.t5, T5_VARIANTS[self.t5][0]))
+        need = sum(f[2] for f in model_files(self.quant, self.family, self.t5)
                    if not os.path.exists(self.path(*f[0].split("/")))) + \
             (0 if os.path.exists(env_python(self.base)) else 7.0)
         free = shutil.disk_usage(self.base).free / 1e9
@@ -738,7 +768,7 @@ class Installer(object):
                      "Checking libraries")
 
     def step_models(self):
-        files = model_files(self.quant, self.family)
+        files = model_files(self.quant, self.family, self.t5)
         total = sum(f[2] for f in files) or 1.0
         done = 0.0
         for rel, url, gb, sha256 in files:
@@ -787,7 +817,14 @@ class Installer(object):
             manifest = dict(common, quant=self.quant,
                             unet="models/flux/flux1-fill-dev-%s.gguf" % self.quant,
                             flux_config_dir="models/flux/config", vae="models/vae/ae.safetensors",
-                            clip_dir="models/clip", t5_dir="models/t5")
+                            clip_dir="models/clip", t5_dir="models/t5", t5=self.t5)
+            if self.t5 == "q8":
+                # The helper loads this file with t5_dir's config.json and tokenizer.
+                manifest["t5_file"] = T5_GGUF_PATH
+                if os.path.exists(self.path("models", "t5", "model.safetensors.index.json")):
+                    self.log("the 16-bit T5 in models/t5 (9.5 GB) isn't used now; choose "
+                             "'Maximum' text encoder to use it again, or delete its "
+                             "model-*.safetensors files to free the space")
         with open(self.path(MANIFEST), "w") as fh:
             json.dump(manifest, fh, indent=2)
         data = config.load()

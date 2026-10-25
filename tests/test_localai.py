@@ -236,6 +236,20 @@ class HelperTests(unittest.TestCase):
             self.assertEqual((kw % 16, kh % 16), (0, 0))
         self.assertEqual(worker.klein_size(512, 512), (512, 512))
 
+    def test_is_installed_needs_the_8bit_t5_when_chosen(self):
+        import json
+        base = os.path.join(self.tmp, "inst8")
+        for rel in ("env/Scripts/python.exe", "env/bin/python", "u.gguf", "v.st", "l.pt"):
+            os.makedirs(os.path.dirname(os.path.join(base, rel)), exist_ok=True)
+            open(os.path.join(base, rel), "w").close()
+        with open(os.path.join(base, "manifest.json"), "w") as fh:
+            json.dump({"unet": "u.gguf", "vae": "v.st", "lama": "l.pt",
+                       "t5_file": "models/t5-gguf/t5.gguf"}, fh)
+        self.assertFalse(localai.is_installed(base))
+        os.makedirs(os.path.join(base, "models", "t5-gguf"))
+        open(os.path.join(base, "models", "t5-gguf", "t5.gguf"), "w").close()
+        self.assertTrue(localai.is_installed(base))
+
     def test_is_installed_requires_manifest_and_files(self):
         self.assertFalse(localai.is_installed(self.tmp))
         os.makedirs(os.path.dirname(localai.env_python(self.tmp)))
@@ -482,6 +496,44 @@ class EmbedCacheTests(unittest.TestCase):
         self.assertNotEqual(key(flux), key(dict(flux, installed="2026-10-23T09:00:00")))
         self.assertNotEqual(key(flux), key(dict(flux, family="flux2-klein")))
         self.assertEqual(key(dict(flux, family=None)), key(flux))   # old installs are FLUX.1
+        # The 8-bit T5 gives slightly different numbers: never mix its cache with 16-bit.
+        self.assertNotEqual(key(flux), key(dict(flux, t5_file="models/t5-gguf/t5.gguf")))
+
+    def test_8bit_t5_loads_with_the_v11_config(self):
+        import json
+        import types
+        with open(os.path.join(self.tmp, "manifest.json"), "w") as fh:
+            json.dump({"family": "flux1-fill", "installed": "x", "t5_dir": "models/t5",
+                       "t5_file": "models/t5-gguf/t5-q8.gguf"}, fh)
+        os.makedirs(os.path.join(self.tmp, "models", "t5-gguf"))
+        with open(os.path.join(self.tmp, "models", "t5-gguf", "t5-q8.gguf"), "wb") as fh:
+            fh.write(b"g" * 1234)
+        calls = {}
+
+        class FakeT5Config(object):
+            @staticmethod
+            def from_pretrained(path):
+                calls["config_from"] = path
+                return "v1.1-config"
+
+        class FakeT5(object):
+            @staticmethod
+            def from_pretrained(path, **kw):
+                calls["model_from"] = (path, kw)
+                return "model"
+
+        fake_tf = types.SimpleNamespace(T5Config=FakeT5Config, T5EncoderModel=FakeT5)
+        fake_torch = types.SimpleNamespace(bfloat16="bf16")
+        eng = self.worker.Engine(self.tmp)
+        with mock.patch.dict(sys.modules, {"transformers": fake_tf, "torch": fake_torch}):
+            self.assertEqual(eng._load_t5(), "model")
+        path, kw = calls["model_from"]
+        self.assertEqual(path, os.path.join(self.tmp, "models", "t5-gguf"))
+        self.assertEqual(kw["gguf_file"], "t5-q8.gguf")
+        self.assertEqual(kw["config"], "v1.1-config")
+        self.assertEqual(calls["config_from"], os.path.join(self.tmp, "models/t5"))
+        # It's unpacked to 16-bit in RAM: the RAM check must use that, not the file size.
+        self.assertEqual(eng._text_encoder_bytes(), int(1234 * 16 / 8.5))
 
     def test_engine_reads_each_prompt_once(self):
         import json

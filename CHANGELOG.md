@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Local AI (FLUX.1 Fill): 8-bit T5 text encoder by default.** New installs and Install /
+  Repair download city96's Q8_0 T5 (5.1 GB, pinned and SHA-256 checked) instead of the 16-bit
+  one (9.5 GB). Same-seed tests on an RTX 3080 Ti gave fills that looked the same (0.5-2.6/255
+  mean difference inside the fill). It's half the download and disk space and reads faster from
+  a hard disk (59 s instead of 96 s, cold). It uses the same RAM once loaded (~9.5 GB), and from
+  Windows' file cache or a fast SSD the 16-bit file can load sooner, so the 16-bit encoder stays
+  available as **Text encoder: Maximum** in the Local AI dialog. Existing installs keep their
+  16-bit files until you choose otherwise, and the two never share prompt-cache entries.
+
 - **Local AI: "Reading the prompt..." takes about 2 seconds instead of 1 to 3 minutes.** The
   text encoder (T5 for FLUX.1 Fill, Qwen3 for FLUX.2 [klein]) is too big to share a 12 GB GPU
   with the image model, so for every new prompt the image model was moved off the GPU, the

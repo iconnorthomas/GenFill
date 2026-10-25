@@ -86,7 +86,7 @@ class InstallerTests(unittest.TestCase):
         files = inst.model_files("Q4_K_S")
         rels = [f[0] for f in files]
         for needed in ("models/flux/flux1-fill-dev-Q4_K_S.gguf", "models/vae/ae.safetensors",
-                       "models/lama/big-lama.pt", "models/t5/model.safetensors",
+                       "models/lama/big-lama.pt", inst.T5_GGUF_PATH, "models/t5/config.json",
                        "models/t5/spiece.model", "models/clip/model.safetensors",
                        "models/clip/vocab.json"):
             self.assertIn(needed, rels)
@@ -147,6 +147,38 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((v["latent_channels"], v["scaling_factor"], v["shift_factor"]),
                          (16, 0.3611, 0.1159))
 
+    def test_t5_is_8bit_by_default_and_16bit_on_request(self):
+        q8 = {f[0]: f for f in inst.model_files("Q4_K_S")}
+        bf16 = {f[0]: f for f in inst.model_files("Q4_K_S", t5="bf16")}
+        self.assertEqual(inst.DEFAULT_T5, "q8")
+        self.assertNotIn("models/t5/model.safetensors", q8)
+        rel, url, gb, sha = q8[inst.T5_GGUF_PATH]
+        self.assertIn("/resolve/%s/" % inst.HF_REVISIONS[inst.T5_GGUF_REPO], url)
+        self.assertEqual(sha, "9ec60f6028534b7fe5af439fcb535d75a68592a9ca3fcdeb175ef89e3ee99825")
+        self.assertIn("models/t5/config.json", q8)      # the GGUF needs t5's v1.1 config
+        self.assertIn("models/t5/model.safetensors", bf16)
+        self.assertNotIn(inst.T5_GGUF_PATH, bf16)
+        self.assertAlmostEqual(inst.estimate_gb("Q4_K_S", t5="bf16") - inst.estimate_gb("Q4_K_S"),
+                               9.5 - 5.06, places=2)
+        with self.assertRaises(ValueError):
+            inst.model_files("Q4_K_S", t5="fp4")
+        with self.assertRaises(ValueError):
+            inst.Installer(base=self.inst.base, t5="fp4")
+
+    def test_configure_records_the_t5_choice(self):
+        cfg_dir = os.path.join(self.tmp, "nukecfg")
+        with mock.patch.object(config, "CONFIG_DIR", cfg_dir),                 mock.patch.object(config, "CONFIG_PATH", os.path.join(cfg_dir, "config.json")):
+            self.inst.step_configure()
+            m = localai.manifest(self.inst.base)
+            self.assertEqual((m["t5"], m["t5_file"], m["t5_dir"]),
+                             ("q8", inst.T5_GGUF_PATH, "models/t5"))
+            big = inst.Installer(base=self.inst.base, quant="Q4_K_S", t5="bf16")
+            big.gpu = ("Test GPU", 12.0)
+            big.step_configure()
+            m = localai.manifest(self.inst.base)
+        self.assertEqual(m["t5"], "bf16")
+        self.assertNotIn("t5_file", m)
+
     def test_klein_files_are_pinned_hashed_and_apache(self):
         files = inst.model_files(None, inst.KLEIN)
         rels = [f[0] for f in files]
@@ -162,7 +194,7 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(any(r.endswith("flux-2-klein-4b.safetensors") for r in rels))
         self.assertTrue(inst.FAMILIES[inst.KLEIN]["commercial"])
         self.assertFalse(inst.FAMILIES[inst.FLUX1]["commercial"])
-        self.assertLess(inst.estimate_gb(None, inst.KLEIN), inst.estimate_gb("Q4_K_S"))
+        self.assertLess(inst.estimate_gb(None, inst.KLEIN), inst.estimate_gb("Q4_K_S", t5="bf16"))
         labels = [l for _k, l in inst.Installer.steps_for(inst.KLEIN)]
         self.assertIn("Download FLUX.2 [klein] 4B, its text encoder and LaMa", labels)
         self.assertEqual(len(labels), len(inst.Installer.STEPS))

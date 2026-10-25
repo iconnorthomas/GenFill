@@ -99,6 +99,8 @@ def is_installed(base=None):
     for key in ("unet", "vae", "lama"):
         if not m.get(key) or not os.path.exists(os.path.join(base, m[key])):
             return False
+    if m.get("t5_file") and not os.path.exists(os.path.join(base, m["t5_file"])):
+        return False                      # the 8-bit text encoder
     return True
 
 

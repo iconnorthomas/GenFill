@@ -307,6 +307,8 @@ def embed_key(manifest):
         parts.append(str(manifest.get("model_dir", "")))
     else:
         parts += [str(manifest.get("t5_dir", "")), str(manifest.get("clip_dir", ""))]
+        if manifest.get("t5_file"):       # 8-bit T5: different numbers, its own cache
+            parts.append(str(manifest["t5_file"]))
     return "|".join(parts)
 
 
@@ -468,15 +470,35 @@ class Engine(object):
                 os.path.join(self._path("model_dir"), "text_encoder"), torch_dtype=torch.bfloat16)
             stream_blocks(enc, enc.model.layers, self.device)
         else:
-            from transformers import T5EncoderModel
-            enc = T5EncoderModel.from_pretrained(self._path("t5_dir"), torch_dtype=torch.bfloat16)
+            enc = self._load_t5()
             stream_blocks(enc, enc.encoder.block, self.device)
         enc.eval()
         log("text encoder read into RAM in %.1fs: %s", time.time() - t0, memory_status())
         self.text_encoder = enc
         return enc
 
+    def _load_t5(self):
+        import torch
+        from transformers import T5EncoderModel
+        if not self.manifest.get("t5_file"):
+            return T5EncoderModel.from_pretrained(self._path("t5_dir"), torch_dtype=torch.bfloat16)
+        # 8-bit GGUF: the weights stay 8-bit in RAM. Its metadata makes transformers build
+        # T5 v1.0 (ReLU) instead of v1.1 (gated-GELU), which garbles every prompt, so the
+        # config comes from t5_dir.
+        from transformers import T5Config
+        gguf = os.path.normpath(self._path("t5_file"))
+        return T5EncoderModel.from_pretrained(
+            os.path.dirname(gguf), gguf_file=os.path.basename(gguf),
+            config=T5Config.from_pretrained(self._path("t5_dir")), torch_dtype=torch.bfloat16)
+
     def _text_encoder_bytes(self):
+        """RAM the text encoder takes once loaded."""
+        if self.manifest.get("t5_file") and self.family != KLEIN:
+            try:
+                # Q8_0 is ~8.5 bits a weight on disk and is unpacked to 16-bit on load.
+                return int(os.path.getsize(self._path("t5_file")) * 16 / 8.5)
+            except OSError:
+                return 0
         if self.family == KLEIN:
             folder = os.path.join(self._path("model_dir"), "text_encoder")
         else:
